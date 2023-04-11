@@ -10,7 +10,7 @@ use rattler_repodata_gateway::fetch::CacheAction;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::defaults::{DEFAULT_CHANNELS, Globals};
+use crate::defaults::{CONDA_BIN_DIRNAME, DEFAULT_CHANNELS, Globals};
 
 /// Represents the strategy to use when checking whether an environment exists.
 #[derive(Debug, Clone)]
@@ -265,7 +265,7 @@ impl VivaEnv {
         } else {
             return Err(anyhow!("No command provided"));
         }
-        let full_exe_path = &self.target_prefix.join("bin").join(executable);
+        let full_exe_path = &self.target_prefix.join(CONDA_BIN_DIRNAME).join(executable);
 
         let updated_env_check_strategy: EnvCheckStrategy = match env_check_strategy {
             EnvCheckStrategy::Auto => {

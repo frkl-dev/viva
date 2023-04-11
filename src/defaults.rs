@@ -50,12 +50,9 @@ impl Globals {
 
 pub const DEFAULT_CHANNELS: [&'static str; 1] = ["conda-forge"];
 
-// impl EnvDetails {
-//     pub fn new(env_name: &str, globals: &Globals, match_spec: Vec<MatchSpec>) -> EnvDetails {
-//         EnvDetails {
-//             env_name: String::from(env_name),
-//             env_prefix: globals.env_prefix.join(env_name),
-//             match_spec: match_spec,
-//         }
-//     }
-// }
+#[cfg(windows)]
+pub(crate) const CONDA_BIN_DIRNAME: &str = "Scripts";
+
+#[cfg(unix)]
+pub(crate) const CONDA_BIN_DIRNAME: &str = "bin";
+
