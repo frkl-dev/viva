@@ -80,12 +80,8 @@ jobs:
       - name: Cache vcpkg dependencies
         uses: actions/cache@v3
         with:
-          path: |
-            ${{ env.VCPKG_ROOT }}/installed
-            ${{ env.VCPKG_ROOT }}/packages
-            ${{ env.VCPKG_ROOT }}/downloads
-            C:\Users\runneradmin\AppData\Local\vcpkg
-          key: ${{ runner.os }}-vcpkg-1-openssl
+          path: C:\OpenSSL-Win64
+          key: ${{ runner.os }}-vcpkg-2-openssl
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
@@ -101,8 +97,21 @@ jobs:
           cache-on-failure: ""
           save-if: ""
 
-      - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - run: vcpkg install openssl:x64-windows-static-md
+      - name: Install OpenSSL
+        run: |
+          $url = "https://slproweb.com/download/Win64OpenSSL-3_1_0.exe"
+          $output = "openssl-installer.exe"
+          Invoke-WebRequest -Uri $url -OutFile $output
+          Start-Process -Wait -FilePath .\$output -ArgumentList "/silent /verysilent /install /sp- /suppressmsgboxes /log=openssl-install.log /nocancelduringinstall /dir=C:\OpenSSL-Win64"
+          Remove-Item $output
+
+      - name: Set environment variables
+        run: |
+          echo "OPENSSL_DIR=C:\OpenSSL-Win64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "PATH=${env:Path};C:\OpenSSL-Win64\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+#      - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
+#      - run: vcpkg install openssl:x64-windows-static-md
 
       - name: Build
         run: cargo build --all --release
