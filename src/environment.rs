@@ -270,15 +270,14 @@ impl VivaEnv {
         let updated_env_check_strategy: EnvCheckStrategy = match env_check_strategy {
             EnvCheckStrategy::Auto => {
                 if ! full_exe_path.exists() {
-                    EnvCheckStrategy::Force
-                } else {
                     full_exe_path.set_extension("exe");
                     if ! full_exe_path.exists() {
                         EnvCheckStrategy::Force
                     } else {
                         EnvCheckStrategy::Auto
                     }
-
+                } else {
+                    EnvCheckStrategy::Skip
                 }
             },
             EnvCheckStrategy::Skip => EnvCheckStrategy::Skip,
