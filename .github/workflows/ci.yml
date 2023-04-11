@@ -85,7 +85,7 @@ jobs:
             ${{ env.VCPKG_ROOT }}/packages
             ${{ env.VCPKG_ROOT }}/downloads
             C:\Users\runneradmin\AppData\Local\vcpkg
-          key: ${{ runner.os }}-vcpkg-0-openssl
+          key: ${{ runner.os }}-vcpkg-1-openssl
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
