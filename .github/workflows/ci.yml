@@ -34,32 +34,6 @@ jobs:
       - run: cargo build --verbose
       - run: cargo test --verbose
 
-  build_on_windows:
-    runs-on: windows-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v3
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: "v0-rust-stable"
-          shared-key: ""
-          key: ""
-          env-vars: ""
-          workspaces: ""
-          cache-directories: ""
-          cache-targets: ""
-          cache-on-failure: ""
-          save-if: ""
-
-      - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - run: vcpkg install openssl:x64-windows-static-md
-
-      - run: rustup update stable && rustup default stable
-
-      - name: Build
-        run: cargo build --all
-
   build-linux:
     runs-on: ubuntu-latest
     needs:
@@ -92,27 +66,6 @@ jobs:
           name: viva_linux_amd64
           path: target/release/viva_linux_amd64
 
-#      - name: Nexus Repo Publish
-#        uses: sonatype-nexus-community/nexus-repo-github-action@master
-#        with:
-#          serverUrl: https://pkgs.frkl.dev
-#          username: github-ci
-#          password: ${{ secrets.NEXUS_PASSWORD }}
-#          format: raw
-#          repository: binaries
-#          coordinates: directory=viva/linux
-#          assets: filename=viva
-#          filename: ./target/release/viva_linux_amd64
-#
-#      - name: Release
-#        uses: softprops/action-gh-release@v1
-#        if: startsWith(github.ref, 'refs/tags/')
-#        with:
-#          files: |
-#            target/release/PROJECT_NAME_amd64
-#        env:
-#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   build-win:
     runs-on: windows-latest
     needs:
@@ -134,18 +87,8 @@ jobs:
           cache-on-failure: ""
           save-if: ""
 
-      - name: Install OpenSSL
-        run: |
-          $url = "https://slproweb.com/download/Win64OpenSSL-3_1_0.exe"
-          $output = "openssl-installer.exe"
-          Invoke-WebRequest -Uri $url -OutFile $output
-          Start-Process -Wait -FilePath .\$output -ArgumentList "/silent /verysilent /install /sp- /suppressmsgboxes /log=openssl-install.log /nocancelduringinstall /dir=C:\OpenSSL-Win64"
-          Remove-Item $output
-
-      - name: Set environment variables
-        run: |
-          echo "OPENSSL_DIR=C:\OpenSSL-Win64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "PATH=${env:Path};C:\OpenSSL-Win64\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - run: vcpkg install openssl:x64-windows-static-md
 
       - run: rustup update stable && rustup default stable
 
@@ -202,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build-linux
-#      - build-win
+      - build-win
       - build-mac
 
     steps:
@@ -216,10 +159,10 @@ jobs:
         with:
           name: viva_darwin
 
-#      - name: download windows binary
-#        uses: actions/download-artifact@v3
-#        with:
-#          name: viva_win
+      - name: download windows binary
+        uses: actions/download-artifact@v3
+        with:
+          name: viva_win
 
       - name: publish latest linux binary
         uses: sonatype-nexus-community/nexus-repo-github-action@master
@@ -245,17 +188,17 @@ jobs:
           assets: filename=viva
           filename: ./viva_darwin
 
-#      - name: publish latest windows binary
-#        uses: sonatype-nexus-community/nexus-repo-github-action@master
-#        with:
-#          serverUrl: https://pkgs.frkl.dev
-#          username: github-ci
-#          password: ${{ secrets.NEXUS_PASSWORD }}
-#          format: raw
-#          repository: binaries
-#          coordinates: directory=viva/windows
-#          assets: filename=viva.exe
-#          filename: ./viva.exe
+      - name: publish latest windows binary
+        uses: sonatype-nexus-community/nexus-repo-github-action@master
+        with:
+          serverUrl: https://pkgs.frkl.dev
+          username: github-ci
+          password: ${{ secrets.NEXUS_PASSWORD }}
+          format: raw
+          repository: binaries
+          coordinates: directory=viva/windows
+          assets: filename=viva.exe
+          filename: ./viva.exe
 
       - name: release binaries
         uses: softprops/action-gh-release@v1
