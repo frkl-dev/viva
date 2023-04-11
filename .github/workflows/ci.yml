@@ -69,8 +69,8 @@ jobs:
           password: ${{ secrets.NEXUS_PASSWORD }}
           format: raw
           repository: frkl-binaries
-          coordinates: groupId=dev.frkl artifactId=viva version=latest
-          assets: classifier=bin
+          coordinates: directory=viva/linux
+          assets: filename=viva,
           filename: ./target/release/viva_linux_amd64
 
       - name: Release
