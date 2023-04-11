@@ -9,7 +9,6 @@ use crate::rattler::writer::IndicatifWriter;
 
 mod defaults;
 mod errors;
-mod micromamba;
 mod rattler;
 mod status;
 mod environment;
