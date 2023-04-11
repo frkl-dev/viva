@@ -9,7 +9,7 @@ env:
 
 jobs:
   build_and_test:
-    name: "build & test on Rust (version: ${{ matrix.toolchain }})"
+    name: "build & test (Linux/Rust '${{ matrix.toolchain }}')"
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -43,6 +43,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v1
 
+      - run: rustup update stable && rustup default stable
+
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v0-rust-stable"
@@ -54,8 +56,6 @@ jobs:
           cache-targets: ""
           cache-on-failure: ""
           save-if: ""
-
-      - run: rustup update stable && rustup default stable
 
       - name: Build
         run: cargo build --all --release && strip target/release/viva && mv target/release/viva target/release/viva_linux_amd64
@@ -75,17 +75,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v1
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: "v0-rust-stable"
-          shared-key: ""
-          key: ""
-          env-vars: ""
-          workspaces: ""
-          cache-directories: ""
-          cache-targets: ""
-          cache-on-failure: ""
-          save-if: ""
+      - run: rustup update stable && rustup default stable
 
       - name: Cache vcpkg dependencies
         uses: actions/cache@v3
@@ -99,10 +89,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-vcpkg-
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v0-rust-stable"
+          shared-key: ""
+          key: ""
+          env-vars: ""
+          workspaces: ""
+          cache-directories: ""
+          cache-targets: ""
+          cache-on-failure: ""
+          save-if: ""
+
       - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
       - run: vcpkg install openssl:x64-windows-static-md
-
-      - run: rustup update stable && rustup default stable
 
       - name: Build
         run: cargo build --all --release
@@ -130,6 +130,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v1
 
+      - run: rustup update stable && rustup default stable
+
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v0-rust-stable"
@@ -141,8 +143,6 @@ jobs:
           cache-targets: ""
           cache-on-failure: ""
           save-if: ""
-
-      - run: rustup update stable && rustup default stable
 
       - name: Build for mac
         run: cargo build --all --release && strip target/release/viva && mv target/release/viva target/release/viva_darwin
