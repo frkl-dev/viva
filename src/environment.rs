@@ -265,14 +265,20 @@ impl VivaEnv {
         } else {
             return Err(anyhow!("No command provided"));
         }
-        let full_exe_path = &self.target_prefix.join(CONDA_BIN_DIRNAME).join(executable);
+        let mut full_exe_path = self.target_prefix.join(CONDA_BIN_DIRNAME).join(executable);
 
         let updated_env_check_strategy: EnvCheckStrategy = match env_check_strategy {
             EnvCheckStrategy::Auto => {
                 if ! full_exe_path.exists() {
                     EnvCheckStrategy::Force
                 } else {
-                    EnvCheckStrategy::Auto
+                    full_exe_path.set_extension("exe");
+                    if ! full_exe_path.exists() {
+                        EnvCheckStrategy::Force
+                    } else {
+                        EnvCheckStrategy::Auto
+                    }
+
                 }
             },
             EnvCheckStrategy::Skip => EnvCheckStrategy::Skip,
