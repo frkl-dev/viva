@@ -40,33 +40,25 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v3
 
-      - name: Install OpenSSL
-        run: |
-          $url = "https://slproweb.com/download/Win64OpenSSL-3_1_0.exe"
-          $output = "openssl-installer.exe"
-          Invoke-WebRequest -Uri $url -OutFile $output
-          Start-Process -Wait -FilePath .\$output -ArgumentList "/silent /verysilent /install /sp- /suppressmsgboxes /log=openssl-install.log /nocancelduringinstall /dir=C:\OpenSSL-Win64"
-          Remove-Item $output
-
-      - name: Set environment variables
-        run: |
-          echo "OPENSSL_DIR=C:\OpenSSL-Win64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          echo "PATH=${env:Path};C:\OpenSSL-Win64\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
+      - uses: Swatinem/rust-cache@v2
         with:
-          profile: minimal
-          toolchain: stable
-          default: true
+          prefix-key: "v0-rust-stable"
+          shared-key: ""
+          key: ""
+          env-vars: ""
+          workspaces: ""
+          cache-directories: ""
+          cache-targets: ""
+          cache-on-failure: ""
+          save-if: ""
 
-      - name: Build Rust project
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release
+      - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - run: vcpkg install openssl:x64-windows-static-md
 
+      - run: rustup update stable && rustup default stable
 
+      - name: Build
+        run: cargo build --all
 
   build-linux:
     runs-on: ubuntu-latest
@@ -141,6 +133,19 @@ jobs:
           cache-targets: ""
           cache-on-failure: ""
           save-if: ""
+
+      - name: Install OpenSSL
+        run: |
+          $url = "https://slproweb.com/download/Win64OpenSSL-3_1_0.exe"
+          $output = "openssl-installer.exe"
+          Invoke-WebRequest -Uri $url -OutFile $output
+          Start-Process -Wait -FilePath .\$output -ArgumentList "/silent /verysilent /install /sp- /suppressmsgboxes /log=openssl-install.log /nocancelduringinstall /dir=C:\OpenSSL-Win64"
+          Remove-Item $output
+
+      - name: Set environment variables
+        run: |
+          echo "OPENSSL_DIR=C:\OpenSSL-Win64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "PATH=${env:Path};C:\OpenSSL-Win64\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - run: rustup update stable && rustup default stable
 
