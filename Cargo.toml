@@ -2,7 +2,6 @@
 name = "viva"
 version = "0.0.1"
 edition = "2021"
-license = "MPL-2.0"
 license-file = "LICENSES"
 authors = ["Markus Binsteiner <markus@frkl.dev>", "Bas Zalmstra <zalmstra.bas@gmail.com>"]
 
