@@ -4,6 +4,10 @@ version = "0.0.1"
 edition = "2021"
 license-file = "LICENSES"
 authors = ["Markus Binsteiner <markus@frkl.dev>", "Bas Zalmstra <zalmstra.bas@gmail.com>"]
+description = "Transparently create environments and run executables contained within."
+homepage = "https://github.com/frkl-dev/viva"
+repository = "https://github.com/frkl-dev/viva"
+readme = "README.md"
 
 [build-dependencies]
 static_vcruntime = "2.0"
