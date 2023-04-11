@@ -87,6 +87,18 @@ jobs:
           cache-on-failure: ""
           save-if: ""
 
+      - name: Cache vcpkg dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.VCPKG_ROOT }}/installed
+            ${{ env.VCPKG_ROOT }}/packages
+            ${{ env.VCPKG_ROOT }}/downloads
+            C:\Users\runneradmin\AppData\Local\vcpkg
+          key: ${{ runner.os }}-vcpkg-0-openssl
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
       - run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append
       - run: vcpkg install openssl:x64-windows-static-md
 
