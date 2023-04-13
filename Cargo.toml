@@ -1,6 +1,6 @@
 [package]
 name = "viva"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 license-file = "LICENSES"
 authors = ["Markus Binsteiner <markus@frkl.dev>", "Bas Zalmstra <zalmstra.bas@gmail.com>"]
