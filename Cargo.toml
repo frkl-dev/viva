@@ -9,6 +9,15 @@ homepage = "https://github.com/frkl-dev/viva"
 repository = "https://github.com/frkl-dev/viva"
 readme = "README.md"
 
+[lib]
+name = "viva"
+path = "src/lib.rs"
+
+[[bin]]
+name = "viva"
+path = "src/cli.rs"
+
+
 [build-dependencies]
 static_vcruntime = "2.0"
 
@@ -18,7 +27,7 @@ bzip2 = "0.4.4"
 clap = { version = "4.1.4", features = ["derive"] }
 console = { version = "0.15.5", features = ["windows-console-colors"] }
 dirs = "4.0.0"
-directories = "4.0.1"
+directories = "5.0.0"
 futures = "0.3.27"
 indicatif = "0.17.3"
 is_executable = "1.0.1"

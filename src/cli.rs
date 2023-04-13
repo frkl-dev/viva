@@ -1,18 +1,8 @@
+use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter, util::SubscriberInitExt};
 
-use environment::VivaEnv;
-use crate::environment::{EnvCheckStrategy, PkgInstallStrategy};
-
-use crate::rattler::global_multi_progress;
-use crate::rattler::writer::IndicatifWriter;
-
-mod defaults;
-mod errors;
-mod rattler;
-mod status;
-mod environment;
-
+use::viva::*;
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -35,8 +25,6 @@ struct Cli {
 
     #[command(subcommand)]
     command: Action,
-
-
 }
 
 #[derive(Debug, clap::Parser)]
@@ -76,9 +64,10 @@ fn handle_result<T>(result: Result<T, anyhow::Error>) -> T {
 async fn main() {
 
     let args = Cli::parse();
-    let globals = defaults::Globals::new();
+    let globals = viva::VivaGlobals::new();
 
-    let viva_env = handle_result(VivaEnv::create(args.env.as_deref().unwrap_or("default"), args.specs, args.channels, &globals));
+    let env_prefix: Option<&PathBuf> = None;
+    let viva_env = handle_result(VivaEnv::create(args.env.as_deref().unwrap_or("default"), args.specs, args.channels, env_prefix, &globals));
 
     // Determine the logging level based on the the verbose flag and the RUST_LOG environment
     // variable.
@@ -106,7 +95,7 @@ async fn main() {
 
     match args.command {
         Action::Ensure { } => handle_result(viva_env.ensure(check_strategy, pkg_install_strategy).await),
-        Action::Run(cmd_args) => handle_result(viva_env.run_command_in_env(&cmd_args.cmd, check_strategy).await),
+        Action::Run(cmd_args) => handle_result(viva_env.run_command_in_env(&cmd_args.cmd, check_strategy, pkg_install_strategy).await),
     }
 
 }
