@@ -154,37 +154,37 @@ jobs:
           name: viva_darwin
           path: target/release/viva_darwin
 
-  build-mac-arm64:
-    runs-on: osx-arm64
-    needs:
-      - build_and_test
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-
-      - run: rustup update stable && rustup default stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: "v0-rust-stable"
-          shared-key: ""
-          key: ""
-          env-vars: ""
-          workspaces: ""
-          cache-directories: ""
-          cache-targets: ""
-          cache-on-failure: ""
-          save-if: ""
-
-      - name: Build for mac
-        run: cargo build --all --release && strip target/release/viva && mv target/release/viva target/release/viva_darwin_arm64
-
-      - name: upload darwin binary
-        uses: actions/upload-artifact@v3
-        with:
-          name: viva_darwin
-          path: target/release/viva_darwin_arm64
+#  build-mac-arm64:
+#    runs-on: osx-arm64
+#    needs:
+#      - build_and_test
+#
+#    steps:
+#      - name: Checkout
+#        uses: actions/checkout@v1
+#
+#      - run: rustup update stable && rustup default stable
+#
+#      - uses: Swatinem/rust-cache@v2
+#        with:
+#          prefix-key: "v0-rust-stable"
+#          shared-key: ""
+#          key: ""
+#          env-vars: ""
+#          workspaces: ""
+#          cache-directories: ""
+#          cache-targets: ""
+#          cache-on-failure: ""
+#          save-if: ""
+#
+#      - name: Build for mac
+#        run: cargo build --all --release && strip target/release/viva && mv target/release/viva target/release/viva_darwin_arm64
+#
+#      - name: upload darwin binary
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: viva_darwin
+#          path: target/release/viva_darwin_arm64
 
   publish-artifacts:
     runs-on: ubuntu-latest
@@ -192,6 +192,7 @@ jobs:
       - build-linux
       - build-win
       - build-mac
+#      - build-mac-arm64
 
     steps:
       - name: download linux binary
@@ -204,10 +205,10 @@ jobs:
         with:
           name: viva_darwin
 
-      - name: download darwin arm64 binary
-        uses: actions/download-artifact@v3
-        with:
-          name: viva_darwin_arm64
+#      - name: download darwin arm64 binary
+#        uses: actions/download-artifact@v3
+#        with:
+#          name: viva_darwin_arm64
 
       - name: download windows binary
         uses: actions/download-artifact@v3
@@ -238,17 +239,17 @@ jobs:
           assets: filename=viva
           filename: ./viva_darwin
 
-      - name: publish latest darwin arm64 binary
-        uses: sonatype-nexus-community/nexus-repo-github-action@master
-        with:
-          serverUrl: https://pkgs.frkl.dev
-          username: github-ci
-          password: ${{ secrets.NEXUS_PASSWORD }}
-          format: raw
-          repository: binaries
-          coordinates: directory=viva/darwin
-          assets: filename=viva
-          filename: ./viva_darwin_arm64
+#      - name: publish latest darwin arm64 binary
+#        uses: sonatype-nexus-community/nexus-repo-github-action@master
+#        with:
+#          serverUrl: https://pkgs.frkl.dev
+#          username: github-ci
+#          password: ${{ secrets.NEXUS_PASSWORD }}
+#          format: raw
+#          repository: binaries
+#          coordinates: directory=viva/darwin
+#          assets: filename=viva
+#          filename: ./viva_darwin_arm64
 
       - name: publish latest windows binary
         uses: sonatype-nexus-community/nexus-repo-github-action@master

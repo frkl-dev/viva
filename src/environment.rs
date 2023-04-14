@@ -269,7 +269,29 @@ impl VivaEnv {
 
         self.ensure(updated_env_check_strategy, pkg_install_strategy).await?;
 
-        let mut command = Command::new(full_exe_path);
+        let mut full_exe_path = self.target_prefix.join(CONDA_BIN_DIRNAME).join(executable);
+
+        let final_path: PathBuf = match full_exe_path.exists() {
+            true => full_exe_path,
+            false => {
+                match full_exe_path.ends_with(".exe") {
+                    true => {
+                        full_exe_path.set_extension("");
+                    }
+                    false => {
+                        full_exe_path.set_extension("exe");
+                    }
+                }
+                match full_exe_path.exists() {
+                    true => full_exe_path,
+                    false => {
+                        return Err(anyhow!("Could not find executable (after setup env phase): {}", executable));
+                    }
+                }
+            }
+        };
+
+        let mut command = Command::new(final_path);
 
         if cmd_args.len() > 0 {
             command.args(cmd_args);
