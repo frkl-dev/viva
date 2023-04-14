@@ -189,8 +189,6 @@ impl VivaEnv {
             return Ok(());
         }
 
-        println!("Reading environment spec file: {}", self.get_env_spec_file().to_string_lossy());
-
         let final_env: Cow<VivaEnv> = match pkg_install_strategy {
             PkgInstallStrategy::Append => {
 
@@ -212,12 +210,6 @@ impl VivaEnv {
                 Cow::Borrowed(self)
             },
         };
-
-        println!("Final env spec: {:?}", final_env);
-
-        // if final_env.specs.is_empty() {
-        //     return Err(anyhow!("No specs provided for environment: {}", self.env_name));
-        // }
 
         let cache_action = CacheAction::CacheOrFetch;
 
@@ -247,7 +239,7 @@ impl VivaEnv {
             return Err(anyhow!("No command provided"));
         }
         let mut full_exe_path = self.target_prefix.join(CONDA_BIN_DIRNAME).join(executable);
-        println!("full_exe_path: {:?}", full_exe_path);
+
         let updated_env_check_strategy: EnvCheckStrategy = match env_check_strategy {
             EnvCheckStrategy::Auto => {
                 if !full_exe_path.exists() {
