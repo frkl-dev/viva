@@ -243,12 +243,18 @@ impl VivaEnv {
         let updated_env_check_strategy: EnvCheckStrategy = match env_check_strategy {
             EnvCheckStrategy::Auto => {
                 if !full_exe_path.exists() {
-                    let mut win_full_path = full_exe_path.clone();
-                    win_full_path.set_extension("exe");
+                    match full_exe_path.ends_with(".exe") {
+                        true => {
+                            full_exe_path.set_extension("");
+                        },
+                        false => {
+                            full_exe_path.set_extension("exe");
+                        },
+                    }
+
                     if !full_exe_path.exists() {
                         EnvCheckStrategy::Force
                     } else {
-                        full_exe_path = win_full_path;
                         EnvCheckStrategy::Auto
                     }
                 } else {
