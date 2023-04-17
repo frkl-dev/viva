@@ -1,16 +1,19 @@
+use crate::environment::VivaEnv;
 use crate::rattler::global_multi_progress;
 use anyhow::{Context, Result};
-use futures::{FutureExt, stream, stream::FuturesUnordered, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{stream, stream::FuturesUnordered, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use indicatif::{HumanBytes, ProgressBar, ProgressState, ProgressStyle};
 use rattler::{
-    install::{InstallDriver, InstallOptions, link_package, Transaction, TransactionOperation},
+    install::{link_package, InstallDriver, InstallOptions, Transaction, TransactionOperation},
     package_cache::PackageCache,
 };
 use rattler_conda_types::{
     Channel, ChannelConfig, GenericVirtualPackage, MatchSpec, Platform, PrefixRecord,
     RepoDataRecord,
 };
-use rattler_repodata_gateway::fetch::{CacheAction, CacheResult, DownloadProgress, FetchRepoDataOptions};
+use rattler_repodata_gateway::fetch::{
+    CacheAction, CacheResult, DownloadProgress, FetchRepoDataOptions,
+};
 use rattler_repodata_gateway::sparse::SparseRepoData;
 use rattler_solve::{LibsolvRepoData, SolverBackend, SolverTask};
 use reqwest::Client;
@@ -24,10 +27,8 @@ use std::{
     time::Duration,
 };
 use tokio::task::JoinHandle;
-use crate::environment::VivaEnv;
 
 pub async fn create(env_spec: &VivaEnv, cache_action: CacheAction) -> Result<()> {
-
     let channel_config = ChannelConfig::default();
     let target_prefix: PathBuf = PathBuf::from(&env_spec.target_prefix);
 
@@ -52,7 +53,8 @@ pub async fn create(env_spec: &VivaEnv, cache_action: CacheAction) -> Result<()>
     // Determine the channels to use from the command line or select the default. Like matchspecs
     // this also requires the use of the `channel_config` so we have to do this manually.
     let channels = env_spec
-        .channels.clone()
+        .channels
+        .clone()
         .into_iter()
         .map(|channel_str| Channel::from_str(&channel_str, &channel_config))
         .collect::<Result<Vec<_>, _>>()?;

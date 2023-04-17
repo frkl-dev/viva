@@ -8,8 +8,8 @@
 use indicatif::{MultiProgress, ProgressDrawTarget};
 use once_cell::sync::Lazy;
 
-pub(crate) mod writer;
 pub(crate) mod commands;
+pub(crate) mod writer;
 
 /// Returns a global instance of [`indicatif::MultiProgress`].
 ///
@@ -24,4 +24,3 @@ pub fn global_multi_progress() -> MultiProgress {
     });
     GLOBAL_MP.clone()
 }
-

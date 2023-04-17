@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use ::viva::*;
 use clap::{Parser, Subcommand};
-use tracing_subscriber::{EnvFilter, filter::LevelFilter, util::SubscriberInitExt};
-
-use::viva::*;
+use std::path::PathBuf;
+use tracing::{debug};
+use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt, EnvFilter};
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -10,8 +10,8 @@ struct Cli {
     #[clap(short, long, global = true)]
     env: Option<String>,
     /// The strategy to use when checking for the environment, allowed values are: auto, force, skip, default: 'auto'.
-    #[clap(long, short='C', global = true)]
-    env_check_strategy: Option<EnvCheckStrategy>,
+    #[clap(long, short = 'l', global = true)]
+    env_load_strategy: Option<EnvLoadStrategy>,
     /// The channels to use in the environment (if not created yet), default: 'conda-forge'.
     #[clap(short, long, global = true)]
     channels: Option<Vec<String>>,
@@ -28,9 +28,7 @@ struct Cli {
 }
 
 #[derive(Debug, clap::Parser)]
-pub struct CmdSpec {
-
-}
+pub struct CmdSpec {}
 
 #[derive(Debug, clap::Parser)]
 pub struct RunCmdSpec {
@@ -41,11 +39,12 @@ pub struct RunCmdSpec {
 
 #[derive(Debug, Subcommand)]
 enum Action {
-    /// Ensure an environment exists, create it with the provided channels/specs if not.
-    Ensure {
-    },
+    /// Make sure an environment exists, create it with the provided channels/specs if not.
+    Apply {},
     /// Start an executable contained in an environment, create the environment if it doesn't exist.
     Run(RunCmdSpec),
+    /// List all available environments.
+    ListEnvs,
 }
 
 fn handle_result<T>(result: Result<T, anyhow::Error>) -> T {
@@ -62,12 +61,19 @@ fn handle_result<T>(result: Result<T, anyhow::Error>) -> T {
 
 #[tokio::main]
 async fn main() {
-
     let args = Cli::parse();
     let globals = viva::VivaGlobals::new();
 
-    let env_prefix: Option<&PathBuf> = None;
-    let viva_env = handle_result(VivaEnv::create(args.env.as_deref().unwrap_or("default"), args.specs, args.channels, env_prefix, &globals));
+    let env: String = match args.env {
+        Some(env_name) => env_name,
+        None => "default".to_string(),
+    };
+
+    let load_strategy = match args.env_load_strategy {
+        Some(strategy) => strategy,
+        None => EnvLoadStrategy::Merge,
+    };
+
 
     // Determine the logging level based on the the verbose flag and the RUST_LOG environment
     // variable.
@@ -78,9 +84,14 @@ async fn main() {
     };
     let env_filter = EnvFilter::builder()
         .with_default_directive(default_filter.into())
-        .from_env().expect("Failed to parse the RUST_LOG environment variable")
+        .from_env()
+        .expect("Failed to parse the RUST_LOG environment variable")
         // filter logs from apple codesign because they are very noisy
-        .add_directive("apple_codesign=off".parse().expect("Failed to parse the RUST_LOG environment variable"));
+        .add_directive(
+            "apple_codesign=off"
+                .parse()
+                .expect("Failed to parse the RUST_LOG environment variable"),
+        );
 
     // Setup the tracing subscriber
     tracing_subscriber::fmt()
@@ -88,16 +99,44 @@ async fn main() {
         .with_writer(IndicatifWriter::new(global_multi_progress()))
         .without_time()
         .finish()
-        .try_init().expect("Failed to initialize the tracing subscriber");
+        .try_init()
+        .expect("Failed to initialize the tracing subscriber");
 
-    let check_strategy = args.env_check_strategy.unwrap_or(EnvCheckStrategy::Auto);
-    let pkg_install_strategy = PkgInstallStrategy::Append;
 
+    let viva_env_status = handle_result(VivaEnvStatus::init_env(
+        &env,
+        args.specs,
+        args.channels,
+        load_strategy,
+        &globals,
+    ).await);
+
+
+    debug!("Starting viva with args: {:?}", &args.command);
     match args.command {
-        Action::Ensure { } => handle_result(viva_env.ensure(check_strategy, pkg_install_strategy).await),
-        Action::Run(cmd_args) => handle_result(viva_env.run_command_in_env(&cmd_args.cmd, check_strategy, pkg_install_strategy).await),
+        Action::Apply {} => {
+            handle_result(viva_env_status.apply().await)
+        }
+        Action::Run(cmd_args) => {
+            let apply_result = viva_env_status.apply().await;
+            if let Err(e) = apply_result {
+                eprintln!("Error: {}", e);
+                for cause in e.chain().skip(1) {
+                    eprintln!("Caused by: {}", cause);
+                }
+                std::process::exit(1);
+            }
+            handle_result(
+                viva_env_status.viva_env
+                    .run_command_in_env(&cmd_args.cmd)
+                    .await,
+            )
+        },
+        Action::ListEnvs => {
+            let envs = globals.list_envs().await;
+            for env in envs.keys() {
+                println!("{}", env);
+            }
+        }
     }
-
 }
-
-
