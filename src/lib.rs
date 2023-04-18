@@ -96,7 +96,7 @@ impl VivaGlobals {
     }
 
     pub async fn list_envs(&self) -> HashMap<String, VivaEnv> {
-        println!("base_env_path: {:?}", self.base_env_path);
+
         let envs = match self.base_env_path.exists() {
             true => {
                 let mut envs = HashMap::new();

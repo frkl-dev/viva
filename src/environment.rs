@@ -533,9 +533,9 @@ impl VivaEnv {
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            println!("Output: {}", stdout);
+            println!("{}", stdout);
         } else {
-            eprintln!("Error: {:?}", output);
+            eprintln!("{:?}", output);
         }
 
         Ok(())
