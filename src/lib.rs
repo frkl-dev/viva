@@ -4,7 +4,6 @@ mod errors;
 mod rattler;
 mod status;
 
-use std::borrow::Cow;
 pub use crate::rattler::global_multi_progress;
 pub use crate::rattler::writer::IndicatifWriter;
 pub use defaults::DEFAULT_CHANNELS;
@@ -12,11 +11,11 @@ use directories::ProjectDirs;
 pub use environment::EnvLoadStrategy;
 pub use environment::{VivaEnv, VivaEnvStatus};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use tokio::join;
-#[macro_use] extern crate prettytable;
-use prettytable::{Table, Row, Cell, format};
+use std::path::{PathBuf};
 
+#[macro_use]
+extern crate prettytable;
+use prettytable::{format, Table};
 
 /// a struct that holds the global app configuration
 #[derive(Debug)]
@@ -121,7 +120,6 @@ impl VivaGlobals {
     }
 
     pub async fn pretty_print_envs(&self) {
-
         let envs = self.list_envs().await;
         let mut env_names: Vec<String> = envs.keys().map(|k| k.to_string()).collect();
         env_names.sort();

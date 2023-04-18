@@ -1,12 +1,9 @@
-use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{PathBuf, MAIN_SEPARATOR};
 use std::process::Stdio;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Error, Result};
-use openssl_sys::glob64_t;
-use rattler_conda_types::StringMatcher;
 use rattler_repodata_gateway::fetch::CacheAction;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -18,7 +15,7 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tracing::debug;
 
-use crate::defaults::{CONDA_BIN_DIRNAME, DEFAULT_CHANNELS, ENV_SPEC_FILENAME};
+use crate::defaults::{CONDA_BIN_DIRNAME, ENV_SPEC_FILENAME};
 use crate::VivaGlobals;
 
 #[derive(Debug, Clone)]
@@ -206,7 +203,7 @@ impl VivaEnvStatus {
 
         let final_env_specs: Vec<String>;
         let final_channels: Vec<String>;
-        let mut change_required: bool;
+        let mut change_required: bool = false;
 
         if env_folder_missing {
             debug!("Environment prefix does not exist, but env spec file does. Setting 'dirty' to 'true', and adding all (old) metadata to new env spec file.");
@@ -231,7 +228,6 @@ impl VivaEnvStatus {
                     && matchspecs_are_equal(&new_env_specs, &existing_env.specs)
                 {
                     debug!("No need to overwrite environment specs, old and new specs are equal.");
-                    change_required = false;
                 } else {
                     debug!("Overwriting environment specs, old and new specs are not equal.");
                     change_required = true;
@@ -249,7 +245,6 @@ impl VivaEnvStatus {
                     0 => {
                         debug!("No need to merge environment specs, old env contains all items from new specs.");
                         final_env_specs = new_env_specs;
-                        change_required = false;
                     }
                     _ => {
                         debug!("Merging environment specs, new env contains items not in old specs: {}", new_env_specs.join(", "));
@@ -262,7 +257,6 @@ impl VivaEnvStatus {
                 match new_channels.len() {
                     0 => {
                         debug!("No need to merge environment channels, new env does not have any new channels.");
-                        change_required = false;
                         final_channels = new_env_channels;
                     }
                     _ => {
@@ -344,9 +338,9 @@ impl VivaEnv {
                         env_spec_file = globals.get_env_config_path(env);
                     }
                     false => {
-                        let temp_env = VivaEnv::parse_env_spec(env).await?;
-                        env_prefix = temp_env.target_prefix;
-                        env_spec_file = temp_env.env_spec_file;
+                        // let temp_env = VivaEnv::parse_env_spec(env).await?;
+                        // env_prefix = temp_env.target_prefix;
+                        // env_spec_file = temp_env.env_spec_file;
                         panic!("String env spec not implemented yet.")
                     }
                 }
@@ -412,7 +406,7 @@ impl VivaEnv {
             Ok(env_spec) => {
                 return Ok(env_spec);
             }
-            Err(e) => {
+            Err(_) => {
                 return Err(anyhow!(
                     "Unable to parse environment specification file: {}",
                     env_spec_file.display()
@@ -579,7 +573,6 @@ impl VivaEnv {
     }
 
     pub async fn remove(&self) -> Result<()> {
-
         let deleted_target_prefix = match &self.target_prefix.exists() {
             true => match fs::remove_dir_all(&self.target_prefix).await {
                 Ok(_) => Ok(()),
@@ -589,15 +582,13 @@ impl VivaEnv {
         };
 
         match deleted_target_prefix {
-            Ok(_) => {
-                match &self.env_spec_file.exists() {
-                    true => match fs::remove_file(&self.env_spec_file).await {
-                        Ok(_) => Ok(()),
-                        Err(e) => Err(anyhow!("Failed to remove environment spec file: {}", e)),
-                    },
-                    false => Ok(()),
-                }
-            }
+            Ok(_) => match &self.env_spec_file.exists() {
+                true => match fs::remove_file(&self.env_spec_file).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(anyhow!("Failed to remove environment spec file: {}", e)),
+                },
+                false => Ok(()),
+            },
             Err(e) => Err(e),
         }
     }

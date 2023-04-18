@@ -1,6 +1,5 @@
 use ::viva::*;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 use tracing::debug;
 use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt, EnvFilter};
 
@@ -45,7 +44,7 @@ enum Action {
     Run(RunCmdSpec),
     /// List all available environments.
     ListEnvs,
-    Remove
+    Remove,
 }
 
 fn handle_result<T>(result: Result<T, anyhow::Error>) -> T {
