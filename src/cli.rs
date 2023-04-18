@@ -1,7 +1,7 @@
 use ::viva::*;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use tracing::{debug};
+use tracing::debug;
 use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt, EnvFilter};
 
 #[derive(Parser, Debug)]
@@ -45,6 +45,7 @@ enum Action {
     Run(RunCmdSpec),
     /// List all available environments.
     ListEnvs,
+    Remove
 }
 
 fn handle_result<T>(result: Result<T, anyhow::Error>) -> T {
@@ -74,7 +75,6 @@ async fn main() {
         None => EnvLoadStrategy::Merge,
     };
 
-
     // Determine the logging level based on the the verbose flag and the RUST_LOG environment
     // variable.
     let default_filter = if args.verbose {
@@ -102,21 +102,13 @@ async fn main() {
         .try_init()
         .expect("Failed to initialize the tracing subscriber");
 
-
-    let viva_env_status = handle_result(VivaEnvStatus::init_env(
-        &env,
-        args.specs,
-        args.channels,
-        load_strategy,
-        &globals,
-    ).await);
-
+    let viva_env_status = handle_result(
+        VivaEnvStatus::init_env(&env, args.specs, args.channels, load_strategy, &globals).await,
+    );
 
     debug!("Starting viva with args: {:?}", &args.command);
     match args.command {
-        Action::Apply {} => {
-            handle_result(viva_env_status.apply().await)
-        }
+        Action::Apply {} => handle_result(viva_env_status.apply().await),
         Action::Run(cmd_args) => {
             let apply_result = viva_env_status.apply().await;
             if let Err(e) = apply_result {
@@ -127,16 +119,17 @@ async fn main() {
                 std::process::exit(1);
             }
             handle_result(
-                viva_env_status.viva_env
+                viva_env_status
+                    .viva_env
                     .run_command_in_env(&cmd_args.cmd)
                     .await,
             )
-        },
+        }
         Action::ListEnvs => {
-            let envs = globals.list_envs().await;
-            for env in envs.keys() {
-                println!("{}", env);
-            }
+            globals.pretty_print_envs().await;
+        }
+        Action::Remove => {
+            handle_result(viva_env_status.viva_env.remove().await);
         }
     }
 }

@@ -4,15 +4,19 @@ mod errors;
 mod rattler;
 mod status;
 
+use std::borrow::Cow;
 pub use crate::rattler::global_multi_progress;
 pub use crate::rattler::writer::IndicatifWriter;
 pub use defaults::DEFAULT_CHANNELS;
 use directories::ProjectDirs;
+pub use environment::EnvLoadStrategy;
 pub use environment::{VivaEnv, VivaEnvStatus};
-pub use environment::{EnvLoadStrategy};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::join;
+#[macro_use] extern crate prettytable;
+use prettytable::{Table, Row, Cell, format};
+
 
 /// a struct that holds the global app configuration
 #[derive(Debug)]
@@ -84,7 +88,11 @@ impl VivaGlobals {
         path
     }
     pub fn get_env_config_path(&self, env_name: &str) -> PathBuf {
-        let path = self.project_dirs.config_dir().join("envs").join(format!("{}.json", env_name));
+        let path = self
+            .project_dirs
+            .config_dir()
+            .join("envs")
+            .join(format!("{}.json", env_name));
         path
     }
 
@@ -98,7 +106,8 @@ impl VivaGlobals {
                     let path = entry.path();
                     if path.is_dir() {
                         let env_name = path.file_name().unwrap().to_str().unwrap();
-                        let viva_env = VivaEnv::load(env_name, &self).await
+                        let viva_env = VivaEnv::load(env_name, &self)
+                            .await
                             .expect(format!("Failed to load environment: {}", env_name).as_str());
                         envs.insert(env_name.to_string(), viva_env);
                     }
@@ -109,5 +118,24 @@ impl VivaGlobals {
         };
 
         envs
+    }
+
+    pub async fn pretty_print_envs(&self) {
+
+        let envs = self.list_envs().await;
+        let mut env_names: Vec<String> = envs.keys().map(|k| k.to_string()).collect();
+        env_names.sort();
+
+        let mut table = Table::new();
+        table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+        table.set_titles(row!["name", "path", "specs", "channels"]);
+        for env in env_names {
+            let viva_env = envs.get(&env).unwrap();
+            let path = viva_env.target_prefix.to_str().unwrap();
+            let specs = viva_env.specs.join("\n");
+            let channels = viva_env.channels.join("\n");
+            table.add_row(row![env, path, specs, channels]);
+        }
+        table.printstd();
     }
 }

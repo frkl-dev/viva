@@ -2,6 +2,14 @@
 
 A generic environment wrapper and (in the future) script interpreter.
 
+This project is in very early alpha state, and its main purpose is to serve as a library for another project I'm working on, to be able to create Python environments dynamically. That being said, I think the pattern it encapsulates can be useful for other/similar circumstances, which is why it's published as a separate project.
+
+## Current (known) issues
+
+- no versioning support for packages
+- applications are not run within an activated environment, so if a (conda) package depends on (for example) populated environment variables (like is done when activating such an environment), then it will fail
+- updating environments with new specs sometimes leaves environments in an unusable state
+
 ## Usage
 
 ### Examples

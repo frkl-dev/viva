@@ -16,7 +16,7 @@ use tokio::fs;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tracing::{debug};
+use tracing::debug;
 
 use crate::defaults::{CONDA_BIN_DIRNAME, DEFAULT_CHANNELS, ENV_SPEC_FILENAME};
 use crate::VivaGlobals;
@@ -25,14 +25,14 @@ use crate::VivaGlobals;
 pub enum EnvLoadStrategy {
     Force,
     Merge,
-    New
+    New,
 }
 
 #[derive(Debug, Clone)]
 pub enum EnvLoadAction {
     Create,
     Merge,
-    Overwrite
+    Overwrite,
 }
 
 /// Allows converting a string to an `EnvLoadStrategy`.
@@ -82,7 +82,7 @@ pub struct VivaEnvPaths {
 #[derive(Debug)]
 pub struct VivaEnvStatus {
     pub viva_env: VivaEnv,
-    dirty: bool
+    dirty: bool,
 }
 
 /// Join two matchspecs lists into a single one.
@@ -109,12 +109,14 @@ fn matchspecs_are_equal(spec_1: &Vec<String>, spec_2: &Vec<String>) -> bool {
     return specs_1 == specs_2;
 }
 
-fn check_for_new_matchspecs(orig_matchspec: &Vec<String>, new_matchspec: &Vec<String>) -> Vec<String> {
-
+fn check_for_new_matchspecs(
+    orig_matchspec: &Vec<String>,
+    new_matchspec: &Vec<String>,
+) -> Vec<String> {
     let mut result = Vec::new();
 
     for spec in new_matchspec {
-        if ! orig_matchspec.contains(spec) {
+        if !orig_matchspec.contains(spec) {
             result.push(spec.clone());
         }
     }
@@ -122,16 +124,14 @@ fn check_for_new_matchspecs(orig_matchspec: &Vec<String>, new_matchspec: &Vec<St
 }
 
 fn check_for_new_channels(orig_channels: &Vec<String>, new_channels: &Vec<String>) -> Vec<String> {
-
     let mut result = Vec::new();
     for channel in new_channels {
-        if ! orig_channels.contains(channel) {
+        if !orig_channels.contains(channel) {
             result.push(channel.clone());
         }
     }
     return result;
 }
-
 
 fn channels_are_equal(channel_1: &Vec<String>, channel_2: &Vec<String>) -> bool {
     let mut channels_1: HashSet<String> = HashSet::new();
@@ -141,10 +141,7 @@ fn channels_are_equal(channel_1: &Vec<String>, channel_2: &Vec<String>) -> bool 
     return channels_1 == channels_2;
 }
 
-
-
 impl VivaEnvStatus {
-
     /// Returns a `VivaEnvStatus` if the environment configuration is successfully created, or an error if there is a problem.
     pub async fn init_env<S: AsRef<str>, I: AsRef<[S]>>(
         env: &str,
@@ -153,24 +150,22 @@ impl VivaEnvStatus {
         load_strategy: EnvLoadStrategy,
         globals: &VivaGlobals,
     ) -> anyhow::Result<VivaEnvStatus> {
-
         let paths = VivaEnv::resolve_paths(env, globals).await?;
 
         debug!("Resolved paths: {:?}", paths);
 
         let mut action: EnvLoadAction;
 
-        if ! paths.env_spec_file_exists {
-                action = EnvLoadAction::Create;
+        if !paths.env_spec_file_exists {
+            action = EnvLoadAction::Create;
         } else {
-
             match load_strategy {
                 EnvLoadStrategy::Force => {
                     action = EnvLoadAction::Overwrite;
-                },
+                }
                 EnvLoadStrategy::Merge => {
                     action = EnvLoadAction::Merge;
-                },
+                }
                 EnvLoadStrategy::New => {
                     if paths.target_prefix_exists {
                         return Err(anyhow!(
@@ -191,8 +186,7 @@ impl VivaEnvStatus {
         }
 
         let mut new_env_specs: Vec<String> = if let Some(s) = specs {
-            s
-                .as_ref()
+            s.as_ref()
                 .iter()
                 .map(|x| String::from(x.as_ref()))
                 .collect()
@@ -200,8 +194,7 @@ impl VivaEnvStatus {
             vec![]
         };
         let mut new_env_channels: Vec<String> = if let Some(c) = channels {
-            c
-                .as_ref()
+            c.as_ref()
                 .iter()
                 .map(|x| String::from(x.as_ref()))
                 .collect()
@@ -226,16 +219,17 @@ impl VivaEnvStatus {
 
         debug!("Registering env action '{:?}' for: {:?}", action, env);
 
-
         match action {
             EnvLoadAction::Create => {
                 final_env_specs = new_env_specs;
                 final_channels = new_env_channels;
                 change_required = true;
-            },
+            }
             EnvLoadAction::Overwrite => {
                 let existing_env = VivaEnv::read_env_spec(&paths.env_spec_file).await?;
-                if channels_are_equal(&new_env_channels, &existing_env.channels) && matchspecs_are_equal(&new_env_specs, &existing_env.specs) {
+                if channels_are_equal(&new_env_channels, &existing_env.channels)
+                    && matchspecs_are_equal(&new_env_specs, &existing_env.specs)
+                {
                     debug!("No need to overwrite environment specs, old and new specs are equal.");
                     change_required = false;
                 } else {
@@ -244,31 +238,33 @@ impl VivaEnvStatus {
                 }
                 final_env_specs = new_env_specs;
                 final_channels = new_env_channels;
-            },
+            }
             EnvLoadAction::Merge => {
                 let existing_env = VivaEnv::read_env_spec(&paths.env_spec_file).await?;
 
-                let new_env_specs: Vec<String> = check_for_new_matchspecs(&existing_env.specs, &new_env_specs);
+                let new_env_specs: Vec<String> =
+                    check_for_new_matchspecs(&existing_env.specs, &new_env_specs);
 
                 match new_env_specs.len() {
                     0 => {
                         debug!("No need to merge environment specs, old env contains all items from new specs.");
                         final_env_specs = new_env_specs;
                         change_required = false;
-                    },
+                    }
                     _ => {
                         debug!("Merging environment specs, new env contains items not in old specs: {}", new_env_specs.join(", "));
                         change_required = true;
                         final_env_specs = join_matchspecs(&new_env_specs, &existing_env.specs);
                     }
                 }
-                let new_channels: Vec<String> = check_for_new_channels(&existing_env.channels, &new_env_channels);
+                let new_channels: Vec<String> =
+                    check_for_new_channels(&existing_env.channels, &new_env_channels);
                 match new_channels.len() {
                     0 => {
                         debug!("No need to merge environment channels, new env does not have any new channels.");
                         change_required = false;
                         final_channels = new_env_channels;
-                    },
+                    }
                     _ => {
                         debug!("Merging environment channels, new env contains items not in old channels: {}", new_channels.join(", "));
                         change_required = true;
@@ -278,7 +274,10 @@ impl VivaEnvStatus {
             }
         }
 
-        debug!("Environment '{:?}' 'dirty' status: {:?}", env, change_required);
+        debug!(
+            "Environment '{:?}' 'dirty' status: {:?}",
+            env, change_required
+        );
 
         let env_spec = VivaEnv {
             target_prefix: paths.target_prefix,
@@ -289,7 +288,7 @@ impl VivaEnvStatus {
 
         let env_spec_status = VivaEnvStatus {
             viva_env: env_spec,
-            dirty: change_required
+            dirty: change_required,
         };
 
         Ok(env_spec_status)
@@ -301,8 +300,6 @@ impl VivaEnvStatus {
         }
         Ok(())
     }
-
-
 }
 
 impl VivaEnv {
@@ -317,9 +314,7 @@ impl VivaEnv {
     ///
     /// # Returns
 
-
     pub async fn resolve_paths(env: &str, globals: &VivaGlobals) -> anyhow::Result<VivaEnvPaths> {
-
         let valid_alias_chars_re = Regex::new(r"[^A-Za-z0-9_]+").unwrap();
 
         let env_prefix: PathBuf;
@@ -343,11 +338,10 @@ impl VivaEnv {
             }
             false => {
                 // check if we have any special characters
-                match ! valid_alias_chars_re.is_match(env) {
+                match !valid_alias_chars_re.is_match(env) {
                     true => {
                         env_prefix = globals.get_env_data_path(env);
                         env_spec_file = globals.get_env_config_path(env);
-
                     }
                     false => {
                         let temp_env = VivaEnv::parse_env_spec(env).await?;
@@ -368,7 +362,7 @@ impl VivaEnv {
                     ));
                 }
                 true
-            },
+            }
             false => false,
         };
 
@@ -381,7 +375,7 @@ impl VivaEnv {
                     ));
                 }
                 true
-            },
+            }
             false => false,
         };
 
@@ -396,18 +390,16 @@ impl VivaEnv {
             target_prefix: env_prefix,
             target_prefix_exists: env_exists,
             env_spec_file,
-            env_spec_file_exists
+            env_spec_file_exists,
         };
         Ok(result)
     }
 
     pub async fn load(env: &str, globals: &VivaGlobals) -> Result<VivaEnv> {
-
         let paths = VivaEnv::resolve_paths(env, globals).await?;
         let env_spec = VivaEnv::read_env_spec(&paths.env_spec_file).await?;
 
         Ok(env_spec)
-
     }
 
     /// Read env spec data from a file.
@@ -437,7 +429,12 @@ impl VivaEnv {
             }
             Err(_) => {
                 let yaml_result: SerdeYamlResult<VivaEnv> = serde_yaml::from_str(&env_spec_data);
-                return yaml_result.with_context(|| format!("Unable to parse environment specification string: {}", env_spec_data));
+                return yaml_result.with_context(|| {
+                    format!(
+                        "Unable to parse environment specification string: {}",
+                        env_spec_data
+                    )
+                });
             }
         }
     }
@@ -460,8 +457,6 @@ impl VivaEnv {
         ));
         Ok(())
     }
-
-
 
     /// Creates a command in the environment, with the specified environment-check  & package-install strategy..
     pub async fn create_command_in_env<S: AsRef<str>, I: AsRef<[S]>>(
@@ -524,13 +519,8 @@ impl VivaEnv {
     /// # Returns
     ///
     /// Returns `Ok(())` if the command runs successfully, or an error if there is a problem.
-    pub async fn run_command_in_env<S: AsRef<str>, I: AsRef<[S]>>(
-        &self,
-        cmd: I
-    ) -> Result<()> {
-        let mut command = self
-            .create_command_in_env(&cmd)
-            .await?;
+    pub async fn run_command_in_env<S: AsRef<str>, I: AsRef<[S]>>(&self, cmd: I) -> Result<()> {
+        let mut command = self.create_command_in_env(&cmd).await?;
 
         let child = command.stdout(Stdio::piped()).spawn().expect(
             format!(
@@ -569,7 +559,6 @@ impl VivaEnv {
     ///
     /// Returns `Ok(())` if the environment check is successful, or an error if there is a problem.
     pub async fn apply(&self) -> Result<()> {
-
         let cache_action = CacheAction::CacheOrFetch;
 
         debug!("Applying environment: {:?}", &self);
@@ -586,6 +575,30 @@ impl VivaEnv {
                 return Ok(());
             }
             Err(e) => return Err(e),
+        }
+    }
+
+    pub async fn remove(&self) -> Result<()> {
+
+        let deleted_target_prefix = match &self.target_prefix.exists() {
+            true => match fs::remove_dir_all(&self.target_prefix).await {
+                Ok(_) => Ok(()),
+                Err(e) => Err(anyhow!("Failed to remove environment: {}", e)),
+            },
+            false => Ok(()),
+        };
+
+        match deleted_target_prefix {
+            Ok(_) => {
+                match &self.env_spec_file.exists() {
+                    true => match fs::remove_file(&self.env_spec_file).await {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(anyhow!("Failed to remove environment spec file: {}", e)),
+                    },
+                    false => Ok(()),
+                }
+            }
+            Err(e) => Err(e),
         }
     }
 }

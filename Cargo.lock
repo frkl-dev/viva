@@ -956,7 +956,7 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d79fbe8970a77e3e34151cc13d3b3e248aa0faaecb9f6091fa07ebefe5ad60"
 dependencies = [
- "encode_unicode",
+ "encode_unicode 0.3.6",
  "lazy_static",
  "libc",
  "unicode-width",
@@ -980,15 +980,6 @@ name = "cookie-factory"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "396de984970346b0d9e93d1415082923c679e5ae5c3ee3dcbd104f5610af126b"
-
-[[package]]
-name = "coolor"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af4d7a805ca0d92f8c61a31c809d4323fdaa939b0b440e544d21db7797c5aaad"
-dependencies = [
- "crossterm",
-]
 
 [[package]]
 name = "core-foundation"
@@ -1113,31 +1104,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossterm"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2102ea4f781910f8a5b98dd061f4c2023f479ce7bb1236330099ceb5a93cf17"
-dependencies = [
- "bitflags",
- "crossterm_winapi",
- "libc",
- "mio",
- "parking_lot",
- "signal-hook",
- "signal-hook-mio",
- "winapi",
-]
-
-[[package]]
-name = "crossterm_winapi"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ae1b35a484aa10e07fe0638d02301c5ad24de82d310ccbd2f3693da5f09bf1c"
-dependencies = [
- "winapi",
-]
-
-[[package]]
 name = "crypto-bigint"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1174,6 +1140,27 @@ dependencies = [
  "ring",
  "signature",
  "x509-certificate",
+]
+
+[[package]]
+name = "csv"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b015497079b9a9d69c02ad25de6c0a6edef051ea6360a327d0bd05802ef64ad"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b2466559f260f48ad25fe6317b3c8dac77b5bdb5763ac7d9d6103530663bc90"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -1366,6 +1353,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs-next"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b98cf8ebf19c3d1b223e151f99a4f9f0690dca41414773390fc824184ac833e1"
+dependencies = [
+ "cfg-if",
+ "dirs-sys-next",
+]
+
+[[package]]
 name = "dirs-sys"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1385,6 +1382,17 @@ dependencies = [
  "libc",
  "redox_users",
  "windows-sys 0.45.0",
+]
+
+[[package]]
+name = "dirs-sys-next"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
+dependencies = [
+ "libc",
+ "redox_users",
+ "winapi",
 ]
 
 [[package]]
@@ -1446,6 +1454,12 @@ name = "encode_unicode"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a357d28ed41a50f9c765dbfe56cbc04a64e53e5fc58ba79fbc34c10ef3df831f"
+
+[[package]]
+name = "encode_unicode"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "encoding_rs"
@@ -2297,15 +2311,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minimad"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38b136454924e4d020e55c4992e07c105b40d5c41b84662862f0e15bc0a2efef"
-dependencies = [
- "once_cell",
-]
-
-[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2749,6 +2754,20 @@ name = "ppv-lite86"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b40af805b3121feab8a3c29f04d8ad262fa8e0561883e7653e024ae4479e6de"
+
+[[package]]
+name = "prettytable-rs"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eea25e07510aa6ab6547308ebe3c036016d162b8da920dbb079e3ba8acf3d95a"
+dependencies = [
+ "csv",
+ "encode_unicode 1.0.0",
+ "is-terminal",
+ "lazy_static",
+ "term",
+ "unicode-width",
+]
 
 [[package]]
 name = "proc-macro-error"
@@ -3550,27 +3569,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24188a676b6ae68c3b2cb3a01be17fbf7240ce009799bb56d5b1409051e78fde"
 
 [[package]]
-name = "signal-hook"
-version = "0.3.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "732768f1176d21d09e076c23a93123d40bba92d50c4058da34d45c8de8e682b9"
-dependencies = [
- "libc",
- "signal-hook-registry",
-]
-
-[[package]]
-name = "signal-hook-mio"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29ad2e15f37ec9a6cc544097b78a1ec90001e9f71b81338ca39f430adaca99af"
-dependencies = [
- "libc",
- "mio",
- "signal-hook",
-]
-
-[[package]]
 name = "signal-hook-registry"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3833,26 +3831,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "term"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c59df8ac95d96ff9bede18eb7300b0fda5e5d8d90960e76f8e14ae765eedbf1f"
+dependencies = [
+ "dirs-next",
+ "rustversion",
+ "winapi",
+]
+
+[[package]]
 name = "termcolor"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be55cf8942feac5c765c2c993422806843c9a9a45d4d5c407ad6dd2ea95eb9b6"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "termimad"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "749b18b17745261a883ab334d931adffc8c5e07e71c73a861e77124557e7b41f"
-dependencies = [
- "coolor",
- "crossbeam",
- "crossterm",
- "minimad",
- "thiserror",
- "unicode-width",
 ]
 
 [[package]]
@@ -4279,6 +4274,7 @@ dependencies = [
  "is_executable",
  "once_cell",
  "openssl-sys",
+ "prettytable-rs",
  "rattler",
  "rattler_conda_types",
  "rattler_repodata_gateway",
@@ -4292,7 +4288,6 @@ dependencies = [
  "static_vcruntime",
  "sysinfo",
  "tar",
- "termimad",
  "tokio",
  "tracing",
  "tracing-subscriber",
