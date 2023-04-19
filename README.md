@@ -24,9 +24,9 @@ viva -c conda-forge -s cookiecutter apply
 #### Run commands in environments
 
 ```bash
-# install the 'cookiecutter' package into an environment called 'project-templates' (if not already there), then run it
+# install the 'cookiecutter' package into an environment called 'project_templates' (if not already there), then run it
 # note the '--' to separate the viva arguments from the command arguments
-viva -e project-templates -c conda-forge -s cookiecutter run -- cookiecutter --help
+viva -e project_templates -c conda-forge -s cookiecutter run -- cookiecutter --help
 ```
 
 #### List available environments
@@ -40,7 +40,7 @@ viva list-envs
 
 ```bash
 # delete the environment called 'project-templates'
-viva -e project-templates remove
+viva -e project_templates remove
 ```
 
 ## Environments
