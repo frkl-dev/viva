@@ -1,5 +1,7 @@
 # viva
 
+Note: ***very very alpha***
+
 A generic environment wrapper and (in the future) script interpreter.
 
 This project is in very early alpha state, and its main purpose is to serve as a library for another project I'm working on. That being said, I think the pattern I want it to encapsulate can be useful for other/similar circumstances, which is why it's published as a separate project.
