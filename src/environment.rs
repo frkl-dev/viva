@@ -1,89 +1,72 @@
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Debug;
 use std::path::{PathBuf, MAIN_SEPARATOR};
 use std::process::Stdio;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Error, Result};
+use directories::ProjectDirs;
 use rattler_repodata_gateway::fetch::CacheAction;
 use regex::Regex;
+use serde::de::Expected;
 use serde::{Deserialize, Serialize};
 use serde_json::Result as SerdeJsonResult;
 use serde_yaml::Result as SerdeYamlResult;
 use tokio::fs;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tracing::debug;
+use crate::app::VivaApp;
+use async_trait::async_trait;
 
+use crate::context::VivaContext;
 use crate::defaults::{CONDA_BIN_DIRNAME, ENV_SPEC_FILENAME};
-use crate::VivaGlobals;
 
-#[derive(Debug, Clone)]
-pub enum EnvLoadStrategy {
-    Force,
-    Merge,
-    New,
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum EnvSyncStatus {
+    Synced,
+    NotSynced,
 }
 
-#[derive(Debug, Clone)]
-pub enum EnvLoadAction {
-    Create,
-    Merge,
-    Overwrite,
-}
-
-/// Allows converting a string to an `EnvLoadStrategy`.
-impl FromStr for EnvLoadStrategy {
-    type Err = Error;
-
-    /// Creates an `EnvLoadStrategy` from the given string.
-    ///
-    /// # Arguments
-    ///
-    /// * `s` - A string that represents the environment check strategy.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the given string does not match any of the available strategies.
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "force" => Ok(EnvLoadStrategy::Force),
-            "new" => Ok(EnvLoadStrategy::New),
-            "merge" => Ok(EnvLoadStrategy::Merge),
-            _ => Err(anyhow!(
-                "Invalid environment environment load strategy: {}. Available: new, merge, force",
-                s
-            )),
+impl ToString for EnvSyncStatus {
+    fn to_string(&self) -> String {
+        match self {
+            EnvSyncStatus::Synced => "Synced".to_string(),
+            EnvSyncStatus::NotSynced => "Not Synced".to_string(),
         }
     }
 }
 
 /// Represents the Viva environment specification.
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct VivaEnv {
-    pub target_prefix: PathBuf,
+pub struct VivaEnvSpec {
     pub channels: Vec<String>,
-    pub specs: Vec<String>,
-    pub env_spec_file: PathBuf,
+    pub pkg_specs: Vec<String>,
 }
 
-#[derive(Debug)]
-pub struct VivaEnvPaths {
-    target_prefix: PathBuf,
-    target_prefix_exists: bool,
-    env_spec_file: PathBuf,
-    env_spec_file_exists: bool,
+impl PartialEq for VivaEnvSpec {
+    fn eq(&self, other: &Self) -> bool {
+        if self.pkg_specs != other.pkg_specs {
+            return false;
+        }
+
+        let mut sorted_channels = self.channels.clone();
+        let mut sorted_channels_other = other.channels.clone();
+
+        sorted_channels.sort();
+        sorted_channels_other.sort();
+
+        sorted_channels == sorted_channels_other
+    }
 }
 
-#[derive(Debug)]
-pub struct VivaEnvStatus {
-    pub viva_env: VivaEnv,
-    dirty: bool,
-}
+impl Eq for VivaEnvSpec {}
 
-/// Join two matchspecs lists into a single one.
-fn join_matchspecs(spec_1: &Vec<String>, spec_2: &Vec<String>) -> Vec<String> {
+/// Join two pacakge spec lists into a single one.
+fn join_pkg_specs(spec_1: &Vec<String>, spec_2: &Vec<String>) -> Vec<String> {
     let mut specs: HashSet<String> = HashSet::new();
     specs.extend(spec_1.iter().cloned());
     specs.extend(spec_2.iter().cloned());
@@ -98,7 +81,7 @@ fn join_channels(channel_1: &Vec<String>, channel_2: &Vec<String>) -> Vec<String
     return specs.into_iter().collect();
 }
 
-fn matchspecs_are_equal(spec_1: &Vec<String>, spec_2: &Vec<String>) -> bool {
+fn pkg_specs_are_equal(spec_1: &Vec<String>, spec_2: &Vec<String>) -> bool {
     let mut specs_1: HashSet<String> = HashSet::new();
     specs_1.extend(spec_1.iter().cloned());
     let mut specs_2: HashSet<String> = HashSet::new();
@@ -106,7 +89,7 @@ fn matchspecs_are_equal(spec_1: &Vec<String>, spec_2: &Vec<String>) -> bool {
     return specs_1 == specs_2;
 }
 
-fn check_for_new_matchspecs(
+fn check_for_new_pkg_specs(
     orig_matchspec: &Vec<String>,
     new_matchspec: &Vec<String>,
 ) -> Vec<String> {
@@ -138,294 +121,122 @@ fn channels_are_equal(channel_1: &Vec<String>, channel_2: &Vec<String>) -> bool 
     return channels_1 == channels_2;
 }
 
-impl VivaEnvStatus {
-    /// Returns a `VivaEnvStatus` if the environment configuration is successfully created, or an error if there is a problem.
-    pub async fn init_env<S: AsRef<str>, I: AsRef<[S]>>(
-        env: &str,
-        specs: Option<I>,
-        channels: Option<I>,
-        load_strategy: EnvLoadStrategy,
-        globals: &VivaGlobals,
-    ) -> anyhow::Result<VivaEnvStatus> {
-        let paths = VivaEnv::resolve_paths(env, globals).await?;
-
-        debug!("Resolved paths: {:?}", paths);
-
-        let mut action: EnvLoadAction;
-
-        if !paths.env_spec_file_exists {
-            action = EnvLoadAction::Create;
-        } else {
-            match load_strategy {
-                EnvLoadStrategy::Force => {
-                    action = EnvLoadAction::Overwrite;
-                }
-                EnvLoadStrategy::Merge => {
-                    action = EnvLoadAction::Merge;
-                }
-                EnvLoadStrategy::New => {
-                    if paths.target_prefix_exists {
-                        return Err(anyhow!(
-                            "Environment prefix already exists: {}",
-                            paths.target_prefix.display()
-                        ));
-                    }
-                    if paths.env_spec_file_exists {
-                        return Err(anyhow!(
-                            "Environment specification file already exists: {}",
-                            paths.env_spec_file.display()
-                        ));
-                    }
-                    // this will never happen
-                    action = EnvLoadAction::Create;
-                }
-            }
+impl VivaEnvSpec {
+    pub fn is_satisfied_by(&self, other_spec: &VivaEnvSpec) -> bool {
+        let new_channels = check_for_new_channels(&other_spec.channels, &self.channels);
+        if !new_channels.is_empty() {
+            return false;
         }
 
-        let mut new_env_specs: Vec<String> = if let Some(s) = specs {
-            s.as_ref()
-                .iter()
-                .map(|x| String::from(x.as_ref()))
-                .collect()
-        } else {
-            vec![]
-        };
-        let mut new_env_channels: Vec<String> = if let Some(c) = channels {
-            c.as_ref()
-                .iter()
-                .map(|x| String::from(x.as_ref()))
-                .collect()
-        } else {
-            vec![]
-        };
-
-        let env_folder_missing = !paths.target_prefix_exists && paths.env_spec_file_exists;
-
-        let final_env_specs: Vec<String>;
-        let final_channels: Vec<String>;
-        let mut change_required: bool = false;
-
-        if env_folder_missing {
-            debug!("Environment prefix does not exist, but env spec file does. Setting 'dirty' to 'true', and adding all (old) metadata to new env spec file.");
-            change_required = true;
-            let existing_env = VivaEnv::read_env_spec(&paths.env_spec_file).await?;
-            new_env_specs = join_matchspecs(&existing_env.specs, &new_env_specs);
-            new_env_channels = join_channels(&existing_env.channels, &new_env_channels);
-            action = EnvLoadAction::Create;
+        let new_matchspecs = check_for_new_pkg_specs(&other_spec.pkg_specs, &&self.pkg_specs);
+        if !new_matchspecs.is_empty() {
+            return false;
         }
-
-        debug!("Registering env action '{:?}' for: {:?}", action, env);
-
-        match action {
-            EnvLoadAction::Create => {
-                final_env_specs = new_env_specs;
-                final_channels = new_env_channels;
-                change_required = true;
-            }
-            EnvLoadAction::Overwrite => {
-                let existing_env = VivaEnv::read_env_spec(&paths.env_spec_file).await?;
-                if channels_are_equal(&new_env_channels, &existing_env.channels)
-                    && matchspecs_are_equal(&new_env_specs, &existing_env.specs)
-                {
-                    debug!("No need to overwrite environment specs, old and new specs are equal.");
-                } else {
-                    debug!("Overwriting environment specs, old and new specs are not equal.");
-                    change_required = true;
-                }
-                final_env_specs = new_env_specs;
-                final_channels = new_env_channels;
-            }
-            EnvLoadAction::Merge => {
-                let existing_env = VivaEnv::read_env_spec(&paths.env_spec_file).await?;
-
-                let new_env_specs: Vec<String> =
-                    check_for_new_matchspecs(&existing_env.specs, &new_env_specs);
-
-                match new_env_specs.len() {
-                    0 => {
-                        debug!("No need to merge environment specs, old env contains all items from new specs.");
-                        final_env_specs = new_env_specs;
-                    }
-                    _ => {
-                        debug!("Merging environment specs, new env contains items not in old specs: {}", new_env_specs.join(", "));
-                        change_required = true;
-                        final_env_specs = join_matchspecs(&new_env_specs, &existing_env.specs);
-                    }
-                }
-                let new_channels: Vec<String> =
-                    check_for_new_channels(&existing_env.channels, &new_env_channels);
-                match new_channels.len() {
-                    0 => {
-                        debug!("No need to merge environment channels, new env does not have any new channels.");
-                        final_channels = new_env_channels;
-                    }
-                    _ => {
-                        debug!("Merging environment channels, new env contains items not in old channels: {}", new_channels.join(", "));
-                        change_required = true;
-                        final_channels = join_channels(&existing_env.channels, &new_env_channels);
-                    }
-                }
-            }
-        }
-
-        debug!(
-            "Environment '{:?}' 'dirty' status: {:?}",
-            env, change_required
-        );
-
-        let env_spec = VivaEnv {
-            target_prefix: paths.target_prefix,
-            channels: final_channels,
-            specs: final_env_specs,
-            env_spec_file: paths.env_spec_file,
-        };
-
-        let env_spec_status = VivaEnvStatus {
-            viva_env: env_spec,
-            dirty: change_required,
-        };
-
-        Ok(env_spec_status)
-    }
-
-    pub async fn apply(&self) -> anyhow::Result<()> {
-        if self.dirty {
-            self.viva_env.apply().await?;
-        }
-        Ok(())
+        return true;
     }
 }
 
-impl VivaEnv {
-    /// Constructs a `VivaEnv` from the given parameters.
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The name or path to or specs of the environment.
-    /// * `specs` - An optional list of specs for the environment.
-    /// * `channels` - An optional list of channels for the environment.
-    /// * `globals` - A reference to a `Globals` object.
-    ///
-    /// # Returns
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VivaEnv {
+    pub id: String,
+    pub env_path: PathBuf,
+    spec_path: Option<PathBuf>,
+    pub spec: VivaEnvSpec,
+    actual_spec_path: PathBuf,
+    actual: VivaEnvSpec,
+    pub sync_status: EnvSyncStatus,
+    spec_changed: bool
+}
 
-    pub async fn resolve_paths(env: &str, globals: &VivaGlobals) -> anyhow::Result<VivaEnvPaths> {
-        let valid_alias_chars_re = Regex::new(r"[^A-Za-z0-9_]+").unwrap();
+impl VivaEnvSpec {
 
-        let env_prefix: PathBuf;
-        let env_spec_file: PathBuf;
+    pub fn new() -> VivaEnvSpec {
+        VivaEnvSpec {
+            channels: vec!(),
+            pkg_specs: vec!()
+        }
+    }
 
-        // Check if the environment string contain a path separator.
-        match env.contains(MAIN_SEPARATOR) {
+    /// Read env spec data from a file that contains multiple environments.
+    pub(crate) async fn read_envs_spec(env_specs_file: &PathBuf) -> Result<BTreeMap<String, VivaEnvSpec>> {
+        match env_specs_file.exists() {
             true => {
-                let path = PathBuf::from(env);
-
-                match path.is_file() {
-                    true => {
-                        env_prefix = path;
-                    }
-                    false => {
-                        env_prefix = path;
-                    }
+                if env_specs_file.is_dir() {
+                    return Err(anyhow!(
+                        "Environments specification file is a directory: {}",
+                        env_specs_file.display()
+                    ));
                 }
-
-                env_spec_file = env_prefix.join(ENV_SPEC_FILENAME);
             }
             false => {
-                // check if we have any special characters
-                match !valid_alias_chars_re.is_match(env) {
-                    true => {
-                        env_prefix = globals.get_env_data_path(env);
-                        env_spec_file = globals.get_env_config_path(env);
-                    }
-                    false => {
-                        // let temp_env = VivaEnv::parse_env_spec(env).await?;
-                        // env_prefix = temp_env.target_prefix;
-                        // env_spec_file = temp_env.env_spec_file;
-                        panic!("String env spec not implemented yet.")
-                    }
-                }
+                return Err(anyhow!(
+                    "Environments specification file does not exist: {}",
+                    env_specs_file.display()
+                ))
             }
         };
 
-        let env_exists: bool = match env_prefix.exists() {
-            true => {
-                if env_prefix.is_file() {
-                    return Err(anyhow!(
-                        "Environment prefix path is a file: {}",
-                        env_prefix.display()
-                    ));
-                }
-                true
-            }
-            false => false,
-        };
+        let mut file = File::open(env_specs_file).await?;
+        let mut env_specs_data = String::new();
+        file.read_to_string(&mut env_specs_data).await?;
 
-        let env_spec_file_exists: bool = match env_spec_file.exists() {
-            true => {
-                if env_spec_file.is_dir() {
-                    return Err(anyhow!(
-                        "Environment specification file is a directory: {}",
-                        env_spec_file.display()
-                    ));
-                }
-                true
-            }
-            false => false,
-        };
-
-        if env_exists && !env_spec_file_exists {
-            return Err(anyhow!(
-                "Environment prefix exists but specification file does not: {}",
-                env_prefix.display()
-            ));
-        }
-
-        let result = VivaEnvPaths {
-            target_prefix: env_prefix,
-            target_prefix_exists: env_exists,
-            env_spec_file,
-            env_spec_file_exists,
-        };
-        Ok(result)
-    }
-
-    pub async fn load(env: &str, globals: &VivaGlobals) -> Result<VivaEnv> {
-        let paths = VivaEnv::resolve_paths(env, globals).await?;
-        let env_spec = VivaEnv::read_env_spec(&paths.env_spec_file).await?;
-
-        Ok(env_spec)
-    }
-
-    /// Read env spec data from a file.
-    pub(crate) async fn read_env_spec(env_spec_file: &PathBuf) -> Result<VivaEnv> {
-        let mut file = File::open(env_spec_file).await?;
-        let mut env_spec_data = String::new();
-        file.read_to_string(&mut env_spec_data).await?;
-
-        match VivaEnv::parse_env_spec(&env_spec_data).await {
-            Ok(env_spec) => {
-                return Ok(env_spec);
+        match VivaEnvSpec::parse_envs_spec(&env_specs_data) {
+            Ok(envs_spec) => {
+                return Ok(envs_spec);
             }
             Err(_) => {
                 return Err(anyhow!(
                     "Unable to parse environment specification file: {}",
-                    env_spec_file.display()
+                    env_specs_file.display()
                 ));
             }
         }
     }
 
-    pub(crate) async fn parse_env_spec(env_spec_data: &str) -> Result<VivaEnv> {
-        let json_result: SerdeJsonResult<VivaEnv> = serde_json::from_str(&env_spec_data);
+     pub(crate) fn parse_envs_spec_json(env_spec_data: &str) -> Result<BTreeMap<String, VivaEnvSpec>> {
+        let json_result: SerdeJsonResult<BTreeMap<String, VivaEnvSpec>> = serde_json::from_str(&env_spec_data);
         match json_result {
             Ok(env_spec) => {
                 return Ok(env_spec);
             }
             Err(_) => {
-                let yaml_result: SerdeYamlResult<VivaEnv> = serde_yaml::from_str(&env_spec_data);
+                return Err(anyhow!(
+                    "Unable to parse environment specification json: {}",
+                    env_spec_data
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn parse_envs_spec_yaml(env_spec_data: &str) -> Result<BTreeMap<String, VivaEnvSpec>> {
+        let json_result = serde_yaml::from_str(&env_spec_data);
+        match json_result {
+            Ok(env_spec) => {
+                return Ok(env_spec);
+            }
+            Err(_) => {
+                return Err(anyhow!(
+                    "Unable to parse environment specification json: {}",
+                    env_spec_data
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn parse_envs_spec(env_spec_data: &str) -> Result<BTreeMap<String, VivaEnvSpec>> {
+
+        let json_result = VivaEnvSpec::parse_envs_spec_json(env_spec_data);
+
+        // TODO: check that alias is valid
+        match json_result {
+            Ok(env_spec) => {
+                return Ok(env_spec);
+            }
+            Err(_) => {
+                let yaml_result = VivaEnvSpec::parse_envs_spec_yaml(env_spec_data);
                 return yaml_result.with_context(|| {
                     format!(
-                        "Unable to parse environment specification string: {}",
+                        "Unable to parse environment specification yaml: {}",
                         env_spec_data
                     )
                 });
@@ -433,23 +244,280 @@ impl VivaEnv {
         }
     }
 
-    pub(crate) async fn write_env_spec(&self) -> anyhow::Result<()> {
-        let env_spec_file = &self.env_spec_file;
+    /// Read env spec data from a file.
+    pub(crate) async fn read_env_spec(env_spec_file: &PathBuf) -> Result<VivaEnvSpec> {
+        match env_spec_file.exists() {
+            true => {
+                if env_spec_file.is_dir() {
+                    return Err(anyhow!(
+                        "Environment specification file is a directory: {}",
+                        env_spec_file.display()
+                    ));
+                }
+            }
+            false => {
+                return Err(anyhow!(
+                    "Environment specification file does not exist: {}",
+                    env_spec_file.display()
+                ))
+            }
+        };
 
-        let env_spec_json = serde_json::to_string(&self).expect(&format!(
-            "Cannot serialize environment spec to JSON: {}",
-            &env_spec_file.to_string_lossy()
-        ));
+        let mut file = File::open(env_spec_file).await?;
+        let mut env_spec_data = String::new();
+        file.read_to_string(&mut env_spec_data).await?;
 
-        if let Some(parent) = env_spec_file.parent() {
-            fs::create_dir_all(parent).await?;
+        match env_spec_file.extension() {
+            Some(ext) => {
+                if ext == "json" {
+                    return VivaEnvSpec::parse_env_spec_json(&env_spec_data);
+                } else if ext == "yaml" || ext == "yml" {
+                    return VivaEnvSpec::parse_env_spec_yaml(&env_spec_data);
+                } else {
+                return Err(anyhow!(
+                    "Unable to parse environment specification file, unknown extension: {}",
+                    ext.to_string_lossy()
+                ));
+
+                }
+
+            }
+            None => {
+                return VivaEnvSpec::parse_env_spec(&env_spec_data);
+            }
+        }
+    }
+
+    pub(crate) fn parse_env_spec_json(env_spec_data: &str) -> Result<VivaEnvSpec> {
+        let json_result: SerdeJsonResult<VivaEnvSpec> = serde_json::from_str(&env_spec_data);
+        match json_result {
+            Ok(env_spec) => {
+                return Ok(env_spec);
+            }
+            Err(_) => {
+                return Err(anyhow!(
+                    "Unable to parse environment specification json: {}",
+                    env_spec_data
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn parse_env_spec_yaml(env_spec_data: &str) -> Result<VivaEnvSpec> {
+        let json_result = serde_yaml::from_str(&env_spec_data);
+        match json_result {
+            Ok(env_spec) => {
+                return Ok(env_spec);
+            }
+            Err(_) => {
+                return Err(anyhow!(
+                    "Unable to parse environment specification json: {}",
+                    env_spec_data
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn parse_env_spec(env_spec_data: &str) -> Result<VivaEnvSpec> {
+
+        let json_result = VivaEnvSpec::parse_env_spec_json(env_spec_data);
+
+        // TODO: check that alias is valid
+        match json_result {
+            Ok(env_spec) => {
+                return Ok(env_spec);
+            }
+            Err(_) => {
+                let yaml_result = VivaEnvSpec::parse_env_spec_yaml(env_spec_data);
+                return yaml_result.with_context(|| {
+                    format!(
+                        "Unable to parse environment specification yaml: {}",
+                        env_spec_data
+                    )
+                });
+            }
+        }
+    }
+}
+
+impl VivaEnv {
+
+    // pub fn new(id: &str, env_path: &PathBuf) -> VivaEnv {
+    //     let actual_spec_path = env_path.join(ENV_SPEC_FILENAME);
+    //     VivaEnv {
+    //         id: String::from(id),
+    //         spec: VivaEnvSpec::new(),
+    //         spec_path: None,
+    //         env_path: env_path.clone(),
+    //         actual: VivaEnvSpec::new(),
+    //         actual_spec_path,
+    //         sync_status: EnvSyncStatus::Synced,
+    //         spec_changed: false
+    //     }
+    // }
+
+    pub async fn update_spec_file(&mut self) -> Result<()> {
+        match self.spec_path {
+            Some(ref spec_path) => {
+                if self.spec_changed {
+                    match spec_path.extension() {
+                        Some(ext) => {
+                            if ext == "json" {
+                                let env_spec_json = serde_json::to_string(&self.spec).expect(&format!(
+                                    "Cannot serialize environment spec to JSON: {}",
+                                    &spec_path.to_string_lossy()
+                                ));
+                                let mut file = File::create(spec_path).await?;
+                                file.write_all(env_spec_json.as_bytes()).await?;
+                            } else if ext == "yaml" || ext == "yml" {
+                                let env_spec_yaml = serde_yaml::to_string(&self.spec).expect(&format!(
+                                    "Cannot serialize environment spec to YAML: {}",
+                                    &spec_path.to_string_lossy()
+                                ));
+                                let mut file = File::create(spec_path).await?;
+                                file.write_all(env_spec_yaml.as_bytes()).await?;
+                            } else {
+                                return Err(anyhow!(
+                                    "Unable to serialize environment specification, unknown extension: {}",
+                                    ext.to_string_lossy()
+                                ));
+                            }
+                        }
+                        None => {
+                            let env_spec_yaml = serde_yaml::to_string(&self.spec).expect(&format!(
+                                "Cannot serialize environment spec to YAML: {}",
+                                &spec_path.to_string_lossy()
+                            ));
+                            let mut file = File::create(spec_path).await?;
+                            file.write_all(env_spec_yaml.as_bytes()).await?;
+                        }
+                    }
+                }
+
+                self.spec_changed = false;
+                Ok(())
+
+            }
+            // fine, in this case we don't need to update the spec file
+            None => {
+                Ok(())
+            }
         }
 
-        std::fs::write(&env_spec_file, env_spec_json).expect(&format!(
-            "Cannot write environment spec to file: {}",
-            &env_spec_file.to_string_lossy()
-        ));
-        Ok(())
+    }
+
+    /// Applies the environments specs and ensures it is created and ready to be used.
+    ///
+    /// Be aware that this could remove some packages that already exist in the environment.
+    ///
+    /// # Arguments
+    ///
+    /// * `update_spec_file` - whether to update the spec file for the environment (if there is one)
+    ///
+    /// # Returns
+    ///
+    /// Returns false if the environment didn't need to be synced, true if it did, and an error if there was a problem.
+    pub async fn apply(&mut self, update_spec_file: bool) -> Result<bool> {
+
+
+        if update_spec_file {
+            self.update_spec_file().await?;
+        }
+
+        if self.sync_status == EnvSyncStatus::Synced {
+            debug!("Environment does not need to be updated, status is synced: {:?}", &self);
+            return Ok(false);
+        }
+
+        debug!("Updating environment: {:?}", &self);
+
+        let cache_action = CacheAction::CacheOrFetch;
+        let create_result = crate::rattler::commands::create::create(&self.env_path, &self.spec, cache_action)
+            .await
+            .with_context(|| format!("Failed to create environment: {:?}", &self));
+
+        debug!("Environment created: {:?}", &create_result);
+        match create_result {
+            Ok(_) => {
+
+                // TODO: delete created env if this fails?
+                let env_spec_file = &self.actual_spec_path;
+
+                let env_spec_json = serde_json::to_string(&self.spec).expect(&format!(
+                    "Cannot serialize environment spec to JSON: {}",
+                    &env_spec_file.to_string_lossy()
+                ));
+
+                std::fs::write(&env_spec_file, env_spec_json).expect(&format!(
+                    "Cannot write environment spec to file: {}",
+                    &env_spec_file.to_string_lossy()
+                ));
+
+                self.actual = self.spec.clone();
+                self.sync_status = EnvSyncStatus::Synced;
+
+                Ok(true)
+            }
+            Err(e) => {
+                debug!("Failed to create environment: {:?}", &e);
+                Err(e)
+            }
+        }
+    }
+
+    fn update_sync_status(&mut self) {
+        let sync_status = match self.spec.is_satisfied_by(&self.actual) {
+            true => EnvSyncStatus::Synced,
+            false => EnvSyncStatus::NotSynced,
+        };
+        self.sync_status = sync_status;
+
+    }
+
+    pub fn add_channels(&mut self, channels: &Vec<String>) -> Result<&Vec<String>> {
+        for channel in channels {
+            if !self.spec.channels.contains(channel) {
+                self.spec.channels.push(channel.clone());
+                self.spec_changed = true;
+            }
+        }
+        self.update_sync_status();
+        Ok(&self.spec.channels)
+    }
+
+    pub fn remove_channels(&mut self, channels: Vec<String>) -> Result<&Vec<String>> {
+        self.spec.channels.retain(|c| !channels.contains(c));
+        self.spec_changed = true;
+        Ok(&self.spec.channels)
+    }
+
+    pub fn add_pkg_specs(&mut self, pkg_specs: &Vec<String>) -> Result<&Vec<String>> {
+        for pkg_spec in pkg_specs {
+            if !self.spec.pkg_specs.contains(pkg_spec) {
+                self.spec.pkg_specs.push(pkg_spec.clone());
+                self.spec_changed = true;
+            }
+        }
+        self.update_sync_status();
+        Ok(&self.spec.pkg_specs)
+    }
+
+
+    pub async fn delete(&self) -> Result<()> {
+        match self.env_path.exists() {
+            true => fs::remove_dir_all(&self.env_path).await?,
+            false => {},
+        };
+        match self.spec_path {
+            Some(ref spec_path) => match spec_path.exists() {
+                true => match fs::remove_file(&spec_path).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(anyhow!("Failed to remove environment spec: {}", e)),
+                },
+                false => Ok(()),
+            },
+            None => Ok(()),
+        }
     }
 
     /// Creates a command in the environment, with the specified environment-check  & package-install strategy..
@@ -468,7 +536,7 @@ impl VivaEnv {
         } else {
             return Err(anyhow!("No command provided"));
         }
-        let mut full_exe_path = self.target_prefix.join(CONDA_BIN_DIRNAME).join(executable);
+        let mut full_exe_path = self.env_path.join(CONDA_BIN_DIRNAME).join(executable);
 
         let final_exe_path: PathBuf = match full_exe_path.exists() {
             true => full_exe_path,
@@ -529,7 +597,7 @@ impl VivaEnv {
         );
 
         let output = child.wait_with_output().await?;
-        // unsafe { child.detach() };
+        // unsafe { child.detach() };fffbbb
 
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -540,58 +608,219 @@ impl VivaEnv {
 
         Ok(())
     }
+}
 
-    /// Applies the environments specs and ensures it is created and ready to be used.
-    ///
-    /// Be aware that this could remove some packages that already exist in the environment.
-    ///
-    /// # Arguments
-    ///
-    /// * `env_check_strategy` - The strategy to use when checking for the environment.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the environment check is successful, or an error if there is a problem.
-    pub async fn apply(&self) -> Result<()> {
-        let cache_action = CacheAction::CacheOrFetch;
+#[async_trait]
+pub trait EnvironmentCollection: Debug {
+    // fn init(context: &VivaContext) -> Self;
+    async fn get_env_names(&self) -> Vec<String>;
+    async fn get_env(&self, env_name: &str) -> Result<&VivaEnv>;
+    async fn get_env_mut(&mut self, env_name: &str) -> Result<&mut VivaEnv>;
+    async fn delete_env(&mut self, env_name: &str) -> Option<VivaEnv>;
+    async fn set_env(&mut self, env_name: &str, env: &VivaEnvSpec) -> Result<&VivaEnv>;
+}
 
-        debug!("Applying environment: {:?}", &self);
+#[derive(Debug)]
+pub struct DefaultEnvCollection {
+    base_env_path: PathBuf,
+    base_config_path: PathBuf,
 
-        let create_result = crate::rattler::commands::create::create(&self, cache_action)
-            .await
-            .with_context(|| format!("Failed to create environment: {:?}", &self));
+    registered_envs: Option<BTreeMap<String, VivaEnv>>,
+}
 
-        debug!("Environment created: {:?}", &create_result);
-        match create_result {
-            Ok(_) => {
-                // TODO: delete created env if this fails?
-                self.write_env_spec().await?;
-                return Ok(());
-            }
-            Err(e) => return Err(e),
-        }
-    }
+impl DefaultEnvCollection {
+    pub async fn create(context: &VivaContext) -> Result<Self> {
+        let final_env_path = context.project_dirs.data_dir().join("envs");
 
-    pub async fn remove(&self) -> Result<()> {
-        let deleted_target_prefix = match &self.target_prefix.exists() {
-            true => match fs::remove_dir_all(&self.target_prefix).await {
-                Ok(_) => Ok(()),
-                Err(e) => Err(anyhow!("Failed to remove environment: {}", e)),
-            },
-            false => Ok(()),
+        let final_config_path = PathBuf::from(context.project_dirs.config_dir());
+
+        let mut env = DefaultEnvCollection {
+            base_env_path: final_env_path,
+            base_config_path: final_config_path,
+            registered_envs: None,
         };
 
-        match deleted_target_prefix {
-            Ok(_) => match &self.env_spec_file.exists() {
-                true => match fs::remove_file(&self.env_spec_file).await {
-                    Ok(_) => Ok(()),
-                    Err(e) => Err(anyhow!("Failed to remove environment spec file: {}", e)),
-                },
-                false => Ok(()),
-            },
-            Err(e) => Err(e),
-        }
+        env.get_all_envs(false).await?;
+        Ok(env)
     }
+
+    async fn get_all_envs(&mut self, force_update: bool) -> Result<&BTreeMap<String, VivaEnv>> {
+        match self.registered_envs.is_none() || force_update {
+            true => {
+                let mut envs: BTreeMap<String, VivaEnv> = BTreeMap::new();
+
+                match self.base_config_path.exists() {
+                    true => {
+                        let JSON_EXT = std::ffi::OsStr::new("json");
+                        let mut envs_file = self.base_config_path.join("envs.json");
+                        if !envs_file.exists() {
+                            envs_file.set_extension("yaml");
+                        }
+                        if envs_file.exists() {
+                            for (env_name, env) in VivaEnvSpec::read_envs_spec(&envs_file).await?.into_iter() {
+                                let env_path: PathBuf = self.base_env_path.join(&env_name);
+                                let env_spec_file: PathBuf = env_path.join("viva_env.json");
+                                let actual_env_spec: VivaEnvSpec = match env_spec_file.exists() {
+                                    true => {
+                                        let env_actual = VivaEnvSpec::read_env_spec(&env_path).await?;
+                                        env_actual
+                                    }
+                                    false => {
+                                        VivaEnvSpec {
+                                            channels: vec![],
+                                            pkg_specs: vec![],
+                                        }
+                                    }
+                                };
+                                let sync_status = match env.is_satisfied_by(&actual_env_spec) {
+                                    true => EnvSyncStatus::Synced,
+                                    false => EnvSyncStatus::NotSynced,
+                                };
+                                let viva_env: VivaEnv = VivaEnv {
+                                    id: env_name.clone(),
+                                    spec_path: Some(envs_file.clone()),
+                                    spec: env,
+                                    env_path: env_path.clone(),
+                                    actual: actual_env_spec,
+                                    actual_spec_path: env_path.join(ENV_SPEC_FILENAME),
+                                    sync_status: sync_status,
+                                    spec_changed: false
+                                };
+                                envs.insert(env_name, viva_env);
+                            }
+
+                        };
+
+                        for entry in std::fs::read_dir(&self.base_config_path.join("envs")).unwrap() {
+                            let entry = entry.unwrap();
+                            let spec_config_file: &PathBuf = &entry.path();
+                            if spec_config_file.is_file() && Some(spec_config_file.extension()) == Some(Some(&JSON_EXT))  {
+                                let env_spec: VivaEnvSpec =
+                                    VivaEnvSpec::read_env_spec(&spec_config_file).await?;
+                                // TODO: check if to_string_lossy is good enough here
+                                let env_name: String =
+                                    spec_config_file.file_stem().unwrap().to_string_lossy().into();
+
+                                if envs.contains_key(&env_name) {
+                                    debug!("Overwriting env {}, as it has it's own spec file.", env_name);
+                                }
+
+                                let env_path: PathBuf = self.base_env_path.join(&env_name);
+                                let env_spec_file: PathBuf = env_path.join("viva_env.json");
+                                let actual_env_spec: VivaEnvSpec = match env_spec_file.exists() {
+                                    true => {
+                                        let env_actual = VivaEnvSpec::read_env_spec(&env_spec_file).await?;
+                                        env_actual
+                                    }
+                                    false => {
+                                        VivaEnvSpec {
+                                            channels: vec![],
+                                            pkg_specs: vec![],
+                                        }
+                                    }
+                                };
+                                let sync_status = match env_spec.is_satisfied_by(&actual_env_spec) {
+                                    true => EnvSyncStatus::Synced,
+                                    false => EnvSyncStatus::NotSynced,
+                                };
+                                let viva_env: VivaEnv = VivaEnv {
+                                    id: env_name.clone(),
+                                    spec_path: Some(spec_config_file.clone()),
+                                    spec: env_spec,
+                                    env_path: env_path,
+                                    actual: actual_env_spec,
+                                    actual_spec_path: env_spec_file,
+                                    sync_status: sync_status,
+                                    spec_changed: false
+                                };
+
+                                envs.insert(env_name, viva_env);
+                            }
+                        }
+                    }
+                    false => {}
+                };
+
+                self.registered_envs = Some(envs);
+            }
+            false => {}
+        };
+
+        Ok(self.registered_envs.as_ref().unwrap())
+    }
+}
+
+#[async_trait]
+impl EnvironmentCollection for DefaultEnvCollection {
+    async fn get_env_names(&self) -> Vec<String> {
+        self.registered_envs
+            .as_ref()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+
+    async fn get_env(&self, env_name: &str) -> Result<&VivaEnv> {
+        let env = self
+            .registered_envs
+            .as_ref()
+            .expect("No envs registered")
+            .get(env_name)
+            .ok_or(anyhow!("No env found with name: {}", env_name));
+        env
+    }
+
+    async fn get_env_mut(&mut self, env_name: &str) -> Result<&mut VivaEnv> {
+        let mut env = self
+            .registered_envs
+            .as_mut()
+            .expect("No envs registered")
+            .get_mut(env_name);
+
+        match env {
+            Some(env) => Ok(env),
+            None => Err(anyhow!("No env found with name: {}", env_name))
+        }
+
+    }
+
+    async fn delete_env(&mut self, env_name: &str) -> Option<VivaEnv> {
+        todo!()
+        // self.registered_envs.as_mut().unwrap().remove(env_name)
+    }
+
+    async fn set_env(&mut self, env_name: &str, env_spec: &VivaEnvSpec) -> Result<&VivaEnv> {
+
+        let spec_config_file = self.base_config_path.join("envs").join(format!("{}.json", env_name));
+        // TODO: check if already exists
+        let env_path = self.base_env_path.join(env_name);
+        let actual = VivaEnvSpec::new();
+        let env_spec_file: PathBuf = env_path.join("viva_env.json");
+
+        let sync_status = match env_spec.is_satisfied_by(&actual) {
+            true => EnvSyncStatus::Synced,
+            false => EnvSyncStatus::NotSynced,
+        };
+
+        let mut viva_env: VivaEnv = VivaEnv {
+            id: String::from(env_name),
+            spec_path: Some(spec_config_file),
+            spec: env_spec.clone(),
+            env_path: env_path,
+            actual: actual,
+            actual_spec_path: env_spec_file,
+            sync_status: sync_status,
+            spec_changed: false
+        };
+
+
+        &viva_env.update_spec_file().await?;
+        self.registered_envs.as_mut().unwrap().insert(env_name.to_string(), viva_env);
+        self.get_env(env_name).await
+    }
+
 }
 
 #[cfg(test)]

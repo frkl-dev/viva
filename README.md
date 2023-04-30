@@ -66,9 +66,9 @@ For now, I'm only interested in the former case, and the latter is only stubbed 
 
 ### Environment specification in the `-e` / `--env` command-line argument
 
-In *viva*, an environment can be specified in several different ways by the env-spec string. *viva* parses the string in teh following order, the first match will determine where the environment lives:
+In *viva*, an environment can be specified in several different ways by the env-spec string. *viva* parses the string in the following order, the first match will determine where the environment lives:
 
-- if the string contains a (OS-specific) path separator (like `/` on Posix, '\' on Windows):
+- if the string contains a (OS-specific) path separator (like `/` on Posix, '\\' on Windows):
   - the string will be interpreted as relative or absolute path:
     - if that path points to an existing file, that file will be read and its content will interpreted as spec data for the environment
     - if that path points to an existing directory, or does not exist, the environment will be created in that directory

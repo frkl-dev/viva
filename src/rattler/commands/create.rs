@@ -1,4 +1,4 @@
-use crate::environment::VivaEnv;
+use crate::environment::VivaEnvSpec;
 use crate::rattler::global_multi_progress;
 use anyhow::{Context, Result};
 use futures::{stream, stream::FuturesUnordered, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
@@ -28,9 +28,8 @@ use std::{
 };
 use tokio::task::JoinHandle;
 
-pub async fn create(env_spec: &VivaEnv, cache_action: CacheAction) -> Result<()> {
+pub async fn create(target_prefix: &PathBuf, env_spec: &VivaEnvSpec, cache_action: CacheAction) -> Result<()> {
     let channel_config = ChannelConfig::default();
-    let target_prefix: PathBuf = PathBuf::from(&env_spec.target_prefix);
 
     // Determine the platform we're going to install for
     let install_platform = Platform::current();
@@ -38,7 +37,7 @@ pub async fn create(env_spec: &VivaEnv, cache_action: CacheAction) -> Result<()>
     // Parse the specs from the command line. We do this explicitly instead of allow clap to deal
     // with this because we need to parse the `channel_config` when parsing matchspecs.
     let specs = env_spec
-        .specs
+        .pkg_specs
         .iter()
         .map(|spec| MatchSpec::from_str(spec))
         .collect::<Result<Vec<_>, _>>()?;
@@ -180,7 +179,7 @@ pub async fn create(env_spec: &VivaEnv, cache_action: CacheAction) -> Result<()>
 /// Executes the transaction on the given environment.
 async fn execute_transaction(
     transaction: Transaction<PrefixRecord, RepoDataRecord>,
-    target_prefix: PathBuf,
+    target_prefix: &PathBuf,
     cache_dir: PathBuf,
     download_client: Client,
 ) -> anyhow::Result<()> {
