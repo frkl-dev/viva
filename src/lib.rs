@@ -1,20 +1,21 @@
-mod app;
+use anyhow::{anyhow, Context, Error, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::Result as SerdeJsonResult;
+use serde_yaml::Result as SerdeYamlResult;
+
+mod config;
 mod context;
 mod defaults;
-mod environment;
 mod errors;
+pub mod models;
 mod rattler;
 mod status;
-mod config;
 
 extern crate prettytable;
 
 pub use crate::rattler::global_multi_progress;
 pub use crate::rattler::writer::IndicatifWriter;
 pub use defaults::DEFAULT_CHANNELS;
-// use directories::ProjectDirs;
-pub use environment::{DefaultEnvCollection, VivaEnv, VivaEnvSpec, EnvSyncStatus};
-use std::collections::HashMap;
-use std::path::PathBuf;
 
 pub use crate::context::VivaContext;
+pub use crate::models::environment::VivaEnvSpec;

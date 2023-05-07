@@ -1,13 +1,15 @@
-use crate::{VivaEnv, VivaEnvSpec};
 use anyhow::{anyhow, Result};
 use directories::ProjectDirs;
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
+use uuid::Uuid;
 
 #[macro_use]
 use crate::defaults::{ENV_SPEC_FILENAME};
-use crate::environment::EnvironmentCollection;
+use crate::models::app::{AppCollection, AppEnvPlacementStrategy, VivaApp, VivaAppSpec};
+use crate::models::environment::{EnvSyncStatus, EnvironmentCollection, VivaEnv, VivaEnvSpec};
+use crate::models::read_model_spec;
 use prettytable::{format, Table};
 use regex::Regex;
 use tracing::debug;
@@ -15,144 +17,365 @@ use tracing::debug;
 /// a struct that holds the global app configuration
 #[derive(Debug)]
 pub struct VivaContext {
-    pub qualifier: String,
-    pub organization: String,
-    pub application: String,
     pub project_dirs: ProjectDirs,
     env_collections: HashMap<String, Box<dyn EnvironmentCollection>>,
+    app_collections: HashMap<String, Box<dyn AppCollection>>,
+    registered_envs: BTreeMap<String, VivaEnv>,
+    registered_apps: BTreeMap<String, VivaApp>,
+    base_env_path: PathBuf,
 }
 
 impl VivaContext {
     /// create a new Globals struct for the viva library
     pub fn init() -> VivaContext {
-        VivaContext::create("dev", "frkl", "viva", None, None, None)
+        VivaContext::create("dev", "frkl", "viva")
     }
 
-    /// create a new Globals struct for a 3rd party application
-    #[allow(dead_code)]
-    pub fn create(
-        qualifier: &str,
-        organization: &str,
-        application: &str,
-        base_env_path: Option<&PathBuf>,
-        base_env_config_path: Option<PathBuf>,
-        base_app_config_path: Option<&PathBuf>,
-    ) -> VivaContext {
+    pub fn create(qualifier: &str, organization: &str, application: &str) -> VivaContext {
         let project_dirs = ProjectDirs::from(qualifier, organization, application)
             .expect("Cannot create project directories");
 
-        let final_env_path = match base_env_path {
-            Some(p) => p.clone(),
-            None => project_dirs.data_dir().join("envs"),
-        };
-
-        let final_env_config_path = match base_env_config_path {
-            Some(p) => p.clone(),
-            None => project_dirs.config_dir().join("envs"),
-        };
-        let final_app_config_path = match base_app_config_path {
-            Some(p) => p.clone(),
-            None => project_dirs.config_dir().join("apps"),
-        };
+        let base_env_path = project_dirs.data_dir().join("envs");
 
         VivaContext {
-            qualifier: String::from(qualifier),
-            organization: String::from(organization),
-            application: String::from(application),
-            project_dirs: project_dirs,
+            project_dirs,
             env_collections: HashMap::new(),
+            app_collections: HashMap::new(),
+            registered_envs: BTreeMap::new(),
+            registered_apps: BTreeMap::new(),
+            base_env_path,
         }
     }
 
-    pub fn add_env_collection(&mut self, col_name: &str, collection: Box<dyn EnvironmentCollection>) {
-        self.env_collections.insert(String::from(col_name), collection);
+    pub async fn add_env_collection(
+        &mut self,
+        collection_id: &str,
+        collection: Box<dyn EnvironmentCollection>,
+    ) -> Result<()> {
+        for env_id in collection.get_env_ids().await {
+            let env_spec = collection.get_env(&env_id).await?;
+            self.add_registered_env(&env_id, collection_id, env_spec.clone(), true)
+                .await?;
+        }
+
+        self.env_collections
+            .insert(String::from(collection_id), collection);
+        Ok(())
     }
 
-    pub async fn list_envs(&self) -> BTreeMap<String, &VivaEnv> {
-        let mut envs: BTreeMap<String, &VivaEnv> = BTreeMap::new();
-        for (col_name, col) in &self.env_collections {
-            for env_name in col.get_env_names().await {
-                match envs.contains_key(&env_name) {
-                    true => {
-                        debug!("Skipping duplicate environment: {}", &env_name);
-                    }
-                    false => {
-                        envs.insert(
-                            env_name.clone(),
-                            col.get_env(&env_name).await.expect(
-                                format!("Can't lookup environment: {}", &env_name).as_str(),
-                            ),
-                        );
-                    }
+    pub async fn add_app_collection(
+        &mut self,
+        collection_id: &str,
+        collection: Box<dyn AppCollection>,
+        env_placement: Option<AppEnvPlacementStrategy>
+    ) -> Result<()> {
+
+        let placement_strategy = match env_placement {
+            Some(strategy) => strategy,
+            None => AppEnvPlacementStrategy::Default
+        };
+
+        for app_id in collection.get_app_ids().await {
+            let app_spec = collection.get_app(&app_id).await?;
+
+            let env_id: String = match &placement_strategy {
+                AppEnvPlacementStrategy::Default => {
+                    String::from("default")
+                },
+                AppEnvPlacementStrategy::Custom(e_id) => { String::from(e_id) },
+                AppEnvPlacementStrategy::CollectionId => {
+                    String::from(collection_id)
+                },
+                AppEnvPlacementStrategy::AppId => {
+                    String::from(&app_id)
+                },
+                AppEnvPlacementStrategy::Unique => {
+                    Uuid::new_v4().to_string()
+                }
+
+            };
+            self.add_registered_app(&app_id, app_spec.clone(), collection_id, env_id, true)
+                .await?;
+        }
+
+        self.app_collections
+            .insert(String::from(collection_id), collection);
+
+        Ok(())
+    }
+
+    pub async fn list_envs(&self) -> &BTreeMap<String, VivaEnv> {
+        &self.registered_envs
+    }
+
+    pub async fn list_apps(&self) -> &BTreeMap<String, VivaApp> {
+
+        &self.registered_apps
+
+    }
+
+    async fn create_env_instance(
+        &self,
+        env_id: &str,
+        collection_id: String,
+        env_spec: Option<VivaEnvSpec>,
+    ) -> Result<VivaEnv> {
+        let env_path = self.base_env_path.join(env_id);
+        let env_spec_file: PathBuf = env_path.join(ENV_SPEC_FILENAME);
+        let actual_env_spec: VivaEnvSpec = match env_spec_file.exists() {
+            true => {
+                let env_actual: VivaEnvSpec = read_model_spec(&env_spec_file).await?;
+                env_actual
+            }
+            false => VivaEnvSpec {
+                channels: vec![],
+                pkg_specs: vec![],
+            },
+        };
+
+        let env_spec = match env_spec {
+            Some(spec) => spec,
+            None => VivaEnvSpec::new(),
+        };
+        let viva_env: VivaEnv = VivaEnv::create(
+            String::from(env_id),
+            String::from(collection_id),
+            env_spec,
+            env_path,
+            actual_env_spec,
+            env_spec_file,
+            EnvSyncStatus::Unknown,
+        );
+
+        Ok(viva_env)
+    }
+
+    async fn add_registered_app(
+        &mut self,
+        app_id: &str,
+        app_spec: VivaAppSpec,
+        collection_id: &str,
+        env_id: String,
+        allow_duplicate: bool,
+    ) -> Result<bool> {
+        match self.registered_apps.contains_key(app_id) {
+            true => {
+                if allow_duplicate {
+                    debug!("Skipping duplicate app: {}",app_id);
+                    Ok(false)
+                } else {
+                    Err(anyhow!("Duplicate app: {}", &app_id))
                 }
             }
-        }
-        envs
-    }
+            false => {
+                debug!("Registering app: {}", app_id);
 
-    pub async fn get_env_names(&self) -> Vec<String> {
-
-        let mut envs: Vec<String> = Vec::new();
-        for (col_name, col) in &self.env_collections {
-            for env_name in col.get_env_names().await {
-                match envs.contains(&env_name) {
-                    true => {
-                        debug!("Skipping duplicate environment: {}", &env_name);
-                    }
-                    false => {
-                        envs.push(env_name.clone());
-                    }
-                }
+                let app_instance = VivaApp::create(
+                    String::from(app_id),
+                    app_spec.clone(),
+                    String::from(collection_id),
+                    env_id
+                );
+                self.registered_apps
+                    .insert(String::from(app_id), app_instance);
+                Ok(true)
             }
         }
-        envs.sort();
-        envs
+
+    }
+
+    async fn add_registered_env(
+        &mut self,
+        env_id: &str,
+        collection_id: &str,
+        env_spec: VivaEnvSpec,
+        allow_duplicate: bool,
+    ) -> Result<bool> {
+        match self.registered_envs.contains_key(env_id) {
+            true => {
+                if allow_duplicate {
+                    debug!("Skipping duplicate environment: {}", &env_id);
+                    Ok(false)
+                } else {
+                    Err(anyhow!("Duplicate environment: {}", &env_id))
+                }
+            }
+            false => {
+                debug!("Registering environment: {}", &env_id);
+                let env_instance = self
+                    .create_env_instance(env_id, String::from(collection_id), Some(env_spec))
+                    .await?;
+                self.registered_envs
+                    .insert(env_id.to_string(), env_instance);
+                Ok(true)
+            }
+        }
+    }
+
+    pub async fn set_env_spec(&mut self, env_id: &str, env_spec: VivaEnvSpec) -> Result<()> {
+        let col_id = &self.get_env(env_id).await?.collection_id.clone();
+        let mut env_col = self
+            .env_collections
+            .get_mut(col_id)
+            .expect(format!("Can't find env collection: {}", col_id).as_str());
+
+        env_col.set_env(env_id, &env_spec).await?;
+        Ok(())
+    }
+
+    pub async fn merge_env_specs(
+        &mut self,
+        target_env_id: &str,
+        spec_to_merge: &VivaEnvSpec,
+        update_env_spec: bool,
+        add_if_not_exist: bool,
+    ) -> Result<()> {
+        if !self.has_env(target_env_id).await {
+            if add_if_not_exist {
+                // TODO: support other collections, not just 'default'
+                self.add_registered_env(target_env_id, "default", spec_to_merge.clone(), false)
+                    .await
+                    .expect("Can't add env");
+            } else {
+                return Err(anyhow!(
+                    "Can't merge environment, it does not exist (yet): {}",
+                    target_env_id
+                ));
+            }
+        }
+
+        let mut env = self
+            .get_env_mut(target_env_id)
+            .await
+            .expect("Can't get env");
+        env.merge_spec(spec_to_merge)?;
+
+        if update_env_spec {
+            let updated_spec = env.spec.clone();
+            self.set_env_spec(target_env_id, updated_spec).await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_env_ids(&self) -> Vec<String> {
+        let mut env_ids = self
+            .registered_envs
+            .keys()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        env_ids.sort();
+        env_ids
     }
 
     pub async fn has_env(&self, env_name: &str) -> bool {
-        self.get_env_names().await.iter().any(|s| s.as_str() == env_name)
+        self.registered_envs.contains_key(env_name)
     }
 
-    pub async fn add_env(&mut self, env_name: &str, env: Option<VivaEnvSpec>, env_collection: Option<&str>) -> Result<&VivaEnv> {
-        let env_col_name = match env_collection {
+    pub async fn add_app(
+        &mut self,
+        app_id: &str,
+        app_spec: VivaAppSpec,
+        collection_id: &str,
+        placement_strategy: AppEnvPlacementStrategy
+    ) -> Result<&VivaApp>{
+
+        let env_id = match placement_strategy {
+            AppEnvPlacementStrategy::Default => {
+                String::from("default")
+            },
+            AppEnvPlacementStrategy::Custom(e_id) => { String::from(e_id) },
+            AppEnvPlacementStrategy::CollectionId => {
+                String::from(collection_id)
+            },
+            AppEnvPlacementStrategy::AppId => {
+                String::from(app_id)
+            },
+            AppEnvPlacementStrategy::Unique => {
+                Uuid::new_v4().to_string()
+            }
+        };
+
+        let mut app_col = self
+            .app_collections
+            .get_mut(collection_id)
+            .expect(format!("App collection not found: {}", collection_id).as_str());
+
+        app_col.set_app(app_id, &app_spec).await?;
+        self.add_registered_app(app_id, app_spec, collection_id, env_id, false).await?;
+
+        let app = self.get_app(app_id).await?;
+        Ok(app)
+
+    }
+
+    pub async fn add_env(
+        &mut self,
+        env_id: &str,
+        env: Option<VivaEnvSpec>,
+        collection_id: Option<&str>,
+    ) -> Result<&VivaEnv> {
+        if self.has_env(env_id).await {
+            return Err(anyhow!("Environment with id '{}' already exists.", env_id));
+        }
+
+        let env_col_name = match collection_id {
             Some(col_name) => col_name,
             None => "default",
         };
 
-        let env_col = self.env_collections.get_mut(env_col_name).expect(
-            format!("Environment collection not found: {}", env_col_name).as_str(),
-        ).as_mut();
+        let env_col = self
+            .env_collections
+            .get_mut(env_col_name)
+            .expect(format!("Environment collection not found: {}", env_col_name).as_str())
+            .as_mut();
 
-        match env {
-            Some(env) => {
-                env_col.set_env(env_name, &env).await
-            }
-            None => {
-                env_col.set_env(env_name, &VivaEnvSpec::new()).await
-            }
+        let env_spec = match env {
+            Some(env) => env,
+            None => VivaEnvSpec::new(),
+        };
+
+        env_col.set_env(env_id, &env_spec).await?;
+
+        self.add_registered_env(env_id, &env_col_name, env_spec, false)
+            .await?;
+        self.get_env(env_id).await
+    }
+
+    pub async fn get_app(&self, app_name: &str) -> Result<&VivaApp> {
+        match self.registered_apps.get(app_name) {
+            Some(app) => Ok(app),
+            None => Err(anyhow!("App not found: {}", app_name)),
         }
-
     }
 
     pub async fn get_env(&self, env_name: &str) -> Result<&VivaEnv> {
-        let comp_env_name = &env_name.to_string();
-        for (col_name, col) in &self.env_collections {
-            if col.get_env_names().await.contains(comp_env_name) {
-                return Ok(col.get_env(env_name).await?);
-            }
+        match self.registered_envs.get(env_name) {
+            Some(env) => Ok(env),
+            None => Err(anyhow!("Environment not found: {}", env_name)),
         }
-        Err(anyhow!("Environment not found: {}", env_name))
     }
 
-    pub async fn get_env_mut(&mut self, env_name: &str) -> Result<&mut VivaEnv> {
-        let comp_env_name = &env_name.to_string();
-        for (col_name, col) in self.env_collections.iter_mut() {
-            if col.get_env_names().await.contains(comp_env_name) {
-                return Ok(col.get_env_mut(env_name).await?);
+    pub async fn get_env_mut(&mut self, env_id: &str) -> Result<&mut VivaEnv> {
+        match self.registered_envs.get_mut(env_id) {
+            Some(env) => Ok(env),
+            None => Err(anyhow!("Environment not found: {}", env_id)),
+        }
+    }
+
+    /// Ensure the sync status of all viva envs is up to date.
+    pub async fn check_envs_sync_status(&mut self) -> Result<()> {
+        let env_ids = self.get_env_ids().await;
+        for env_id in env_ids {
+            let mut env = self.get_env_mut(&env_id).await?;
+            if env.sync_status == EnvSyncStatus::Unknown {
+                env.check_and_update_sync_status();
             }
         }
-        Err(anyhow!("Environment not found: {}", env_name))
+        Ok(())
     }
+
+
 
     pub async fn pretty_print_envs(&self) {
         let envs = self.list_envs().await;
@@ -161,10 +384,17 @@ impl VivaContext {
 
         let mut table = Table::new();
         table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-        table.set_titles(prettytable::row!["name", "path", "specs", "channels", "status"]);
+        table.set_titles(prettytable::row![
+            "name", "path", "specs", "channels", "status"
+        ]);
+
+        let compact: bool = false;
         for env in env_names {
+            if !compact {
+                table.add_row(prettytable::row!["", "", "", "", ""]);
+            }
             let viva_env = envs.get(&env).unwrap();
-            let path = viva_env.env_path.to_str().unwrap();
+            let path = viva_env.get_env_path().to_str().unwrap();
             let specs = viva_env.spec.pkg_specs.join("\n");
             let channels = viva_env.spec.channels.join("\n");
             let status = &viva_env.sync_status;

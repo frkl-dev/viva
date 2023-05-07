@@ -1,4 +1,4 @@
-use crate::environment::VivaEnvSpec;
+use crate::models::environment::VivaEnvSpec;
 use crate::rattler::global_multi_progress;
 use anyhow::{Context, Result};
 use futures::{stream, stream::FuturesUnordered, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
@@ -28,7 +28,11 @@ use std::{
 };
 use tokio::task::JoinHandle;
 
-pub async fn create(target_prefix: &PathBuf, env_spec: &VivaEnvSpec, cache_action: CacheAction) -> Result<()> {
+pub async fn create(
+    target_prefix: &PathBuf,
+    env_spec: &VivaEnvSpec,
+    cache_action: CacheAction,
+) -> Result<()> {
     let channel_config = ChannelConfig::default();
 
     // Determine the platform we're going to install for
