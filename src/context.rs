@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 use directories::ProjectDirs;
 use std::collections::{BTreeMap, HashMap};
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf, MAIN_SEPARATOR};
+
+use std::path::{PathBuf};
 use uuid::Uuid;
 
 #[macro_use]
@@ -11,7 +11,7 @@ use crate::models::app::{AppCollection, AppEnvPlacementStrategy, VivaApp, VivaAp
 use crate::models::environment::{EnvSyncStatus, EnvironmentCollection, VivaEnv, VivaEnvSpec};
 use crate::models::read_model_spec;
 use prettytable::{format, Table};
-use regex::Regex;
+
 use tracing::debug;
 
 /// a struct that holds the global app configuration
@@ -214,7 +214,7 @@ impl VivaContext {
 
     pub async fn set_env_spec(&mut self, env_id: &str, env_spec: VivaEnvSpec) -> Result<()> {
         let col_id = &self.get_env(env_id).await?.collection_id.clone();
-        let mut env_col = self
+        let env_col = self
             .env_collections
             .get_mut(col_id)
             .expect(format!("Can't find env collection: {}", col_id).as_str());
@@ -244,7 +244,7 @@ impl VivaContext {
             }
         }
 
-        let mut env = self
+        let env = self
             .get_env_mut(target_env_id)
             .await
             .expect("Can't get env");
@@ -296,7 +296,7 @@ impl VivaContext {
             }
         };
 
-        let mut app_col = self
+        let app_col = self
             .app_collections
             .get_mut(collection_id)
             .expect(format!("App collection not found: {}", collection_id).as_str());
@@ -367,7 +367,7 @@ impl VivaContext {
     pub async fn check_envs_sync_status(&mut self) -> Result<()> {
         let env_ids = self.get_env_ids().await;
         for env_id in env_ids {
-            let mut env = self.get_env_mut(&env_id).await?;
+            let env = self.get_env_mut(&env_id).await?;
             if env.sync_status == EnvSyncStatus::Unknown {
                 env.check_and_update_sync_status();
             }

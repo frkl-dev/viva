@@ -1,18 +1,18 @@
-use crate::context::VivaContext;
+
 use crate::models::environment::VivaEnvSpec;
 use crate::models::{read_model_spec, read_models_spec, write_model_spec};
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use regex::Regex;
+
 use serde::{Deserialize, Serialize};
-use serde_json::Result as SerdeJsonResult;
-use serde_yaml::Result as SerdeYamlResult;
+
+
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::path::{PathBuf, MAIN_SEPARATOR};
-use tokio::fs;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+use std::path::{PathBuf};
+
+
+
 use tracing::debug;
 
 pub enum AppEnvPlacementStrategy {
@@ -118,7 +118,7 @@ impl DefaultAppCollection {
     ) -> Result<&BTreeMap<String, VivaAppSpec>> {
         match self.registered_apps.is_none() || force_update {
             true => {
-                let mut apps: BTreeMap<String, VivaAppSpec> = match self.base_config_path.exists() {
+                let apps: BTreeMap<String, VivaAppSpec> = match self.base_config_path.exists() {
                     true => {
                         let mut app_file = self.base_config_path.join("apps.json");
                         if !app_file.exists() {
@@ -192,7 +192,7 @@ impl AppCollection for DefaultAppCollection {
         env
     }
 
-    async fn delete_app(&mut self, app_id: &str) -> Option<VivaAppSpec> {
+    async fn delete_app(&mut self, _app_id: &str) -> Option<VivaAppSpec> {
         todo!()
         // self.registered_envs.as_mut().unwrap().remove(env_name)
     }

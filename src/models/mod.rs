@@ -2,14 +2,14 @@ pub mod app;
 pub mod cmd;
 pub mod environment;
 
-use crate::defaults::DEFAULT_CHANNELS;
+
 // use directories::ProjectDirs;
-use anyhow::{anyhow, Context, Error, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Result as SerdeJsonResult;
 use serde_yaml::Result as SerdeYamlResult;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::fs::File;

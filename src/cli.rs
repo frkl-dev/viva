@@ -2,15 +2,15 @@ use ::viva::*;
 use anyhow::Result;
 use clap::builder::OsStr;
 use clap::{arg, Arg, ArgAction, Command};
-use config::{Config, Environment, File, FileFormat};
-use directories::ProjectDirs;
+use config::{Config, Environment, FileFormat};
+
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::ffi::OsString;
+
+
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use tracing::debug;
-use tracing_subscriber::{filter::LevelFilter, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{util::SubscriberInitExt};
 use viva::models::app::{AppEnvPlacementStrategy, DefaultAppCollection, VivaAppSpec};
 use viva::models::environment::DefaultEnvCollection;
 
@@ -182,7 +182,7 @@ async fn main() -> Result<()> {
     let env_base_path = context.project_dirs.data_dir().join("envs");
     let config_path = PathBuf::from(context.project_dirs.config_dir());
 
-    let mut env_collection =
+    let env_collection =
         Box::new(DefaultEnvCollection::create(env_base_path, config_path.clone()).await?);
     context
         .add_env_collection("default", env_collection)
@@ -190,7 +190,7 @@ async fn main() -> Result<()> {
 
     let placement_strategy = AppEnvPlacementStrategy::CollectionId;
 
-    let mut app_collection = Box::new(DefaultAppCollection::create(config_path).await?);
+    let app_collection = Box::new(DefaultAppCollection::create(config_path).await?);
     context.add_app_collection("default", app_collection, Some(placement_strategy)).await;
 
     match matches.subcommand() {
@@ -276,11 +276,11 @@ async fn main() -> Result<()> {
         }
         Some(("run", run_matches)) => {
             debug!("running 'run' subcommand");
-            let env_name = run_matches
+            let _env_name = run_matches
                 .get_one::<String>("env")
                 .map(|s| s.to_string())
                 .expect("No environment name provided.");
-            let viva_env_spec = extract_env_spec(run_matches)?;
+            let _viva_env_spec = extract_env_spec(run_matches)?;
 
             println!("run");
         }

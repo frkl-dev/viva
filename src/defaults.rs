@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+
 
 pub const DEFAULT_CHANNELS: [&'static str; 1] = ["conda-forge"];
 

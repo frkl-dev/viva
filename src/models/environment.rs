@@ -1,28 +1,28 @@
-use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Debug;
-use std::path::{PathBuf, MAIN_SEPARATOR};
-use std::process::Stdio;
-use std::str::FromStr;
 
-use anyhow::{anyhow, Context, Error, Result};
+use std::collections::{BTreeMap, HashSet};
+use std::fmt::Debug;
+use std::path::{PathBuf};
+use std::process::Stdio;
+
+
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use directories::ProjectDirs;
+
 use rattler_repodata_gateway::fetch::CacheAction;
-use regex::Regex;
-use serde::de::Expected;
+
+
 use serde::{Deserialize, Serialize};
-use serde_json::Result as SerdeJsonResult;
-use serde_yaml::Result as SerdeYamlResult;
-use tokio::fs;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncWriteExt;
+
+
+
+
+
+
 use tokio::process::Command;
 use tracing::debug;
 
-use crate::context::VivaContext;
-use crate::defaults::{CONDA_BIN_DIRNAME, ENV_SPEC_FILENAME};
+
+use crate::defaults::{CONDA_BIN_DIRNAME};
 use crate::models::{read_model_spec, read_models_spec, write_model_spec};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -550,7 +550,7 @@ impl EnvironmentCollection for DefaultEnvCollection {
         env
     }
 
-    async fn delete_env(&mut self, env_name: &str) -> Option<VivaEnv> {
+    async fn delete_env(&mut self, _env_name: &str) -> Option<VivaEnv> {
         todo!()
         // self.registered_envs.as_mut().unwrap().remove(env_name)
     }
@@ -574,8 +574,8 @@ impl EnvironmentCollection for DefaultEnvCollection {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::path::Path;
+    
+    
 
     #[tokio::test]
     async fn test_viva_env_from_str_with_spec_file() {
