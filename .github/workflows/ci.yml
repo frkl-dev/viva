@@ -99,7 +99,7 @@ jobs:
 
       - name: Install OpenSSL
         run: |
-          $url = "https://slproweb.com/download/Win64OpenSSL-3_1_0.exe"
+          $url = "https://slproweb.com/download/Win64OpenSSL-3_1_1.exe"
           $output = "openssl-installer.exe"
           Invoke-WebRequest -Uri $url -OutFile $output
           Start-Process -Wait -FilePath .\$output -ArgumentList "/silent /verysilent /install /sp- /suppressmsgboxes /log=openssl-install.log /nocancelduringinstall /dir=C:\OpenSSL-Win64"
