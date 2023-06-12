@@ -245,7 +245,7 @@ impl VivaEnv {
     /// # Returns
     ///
     /// Returns false if the environment didn't need to be synced, true if it did, and an error if there was a problem.
-    pub async fn apply(&mut self) -> Result<bool> {
+    pub async fn sync(&mut self) -> Result<bool> {
         if self.sync_status == EnvSyncStatus::Unknown {
             debug!("Calculating sync status for environment: {:?}", &self.id);
             self.check_and_update_sync_status();
@@ -640,10 +640,9 @@ impl EnvironmentCollection for DefaultEnvCollection {
     }
 
     async fn set_env(&mut self, env_id: &str, env_spec: &VivaEnvSpec) -> Result<()> {
-
-        if self.get_env_ids().await.iter().any(|s| s == env_id) {
-            return Err(anyhow!("Environment with id '{}' already exists", env_id));
-        }
+        // if self.get_env_ids().await.iter().any(|s| s == env_id) {
+        //     return Err(anyhow!("Environment with id '{}' already exists", env_id));
+        // }
 
         let spec_config_file = self
             .base_config_path

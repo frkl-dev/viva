@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use ::viva::*;
 use anyhow::{bail, Result};
 use clap::builder::OsStr;
@@ -39,9 +40,15 @@ fn create_command(viva_config: &VivaConfig) -> Command {
         .map(|s| OsStr::from(s))
         .collect::<Vec<OsStr>>();
 
-    let environment_arg = Arg::new("env")
-        .help("The name of the environment to use.")
+    let environment_arg = Arg::new("env-id")
+        .help("The id of the environment to use.")
         .default_value("default");
+
+    let environments_arg = Arg::new("env-id")
+        .help("The names of the environments to use (defaults to all).")
+        .action(ArgAction::Append)
+        .required(false);
+
     let replace_arg = Arg::new("replace")
         .action(ArgAction::SetTrue)
         .short('r')
@@ -105,6 +112,10 @@ fn create_command(viva_config: &VivaConfig) -> Command {
         .about("Delete an environment.")
         .arg(environment_arg.clone());
 
+    let sync_env_subcommand = Command::new("sync")
+        .about("Make sure all environment packages from a specs' environment are installed locally.")
+        .arg(environments_arg.clone());
+
     let register_app_subcommand = Command::new("register-app")
         .about("Register an app, and optionally install all the required packages locally.")
         .arg(app_name)
@@ -138,6 +149,7 @@ fn create_command(viva_config: &VivaConfig) -> Command {
         .subcommand(list_envs_subcommand)
         .subcommand(register_env_subcommand)
         .subcommand(delete_env_subcommand)
+        .subcommand(sync_env_subcommand)
         .subcommand(list_apps_subcommand)
         .subcommand(register_app_subcommand)
         .subcommand(run_subcommand);
@@ -210,7 +222,7 @@ async fn main() -> Result<()> {
         Some(("register-env", apply_matches)) => {
             debug!("running 'apply' subcommand");
             let env_name = apply_matches
-                .get_one::<String>("env")
+                .get_one::<String>("env-id")
                 .map(|s| s.to_string())
                 .expect("No environment name provided.");
             let viva_env_spec = extract_env_spec(apply_matches)?;
@@ -220,10 +232,10 @@ async fn main() -> Result<()> {
                     let replace = apply_matches.get_flag("replace");
                     if replace {
                         context.remove_env(&env_name).await?;
+                        debug!("environment {} already registered", env_name);
                     } else {
                         bail!("environment {} already registered", env_name);
                     }
-                    debug!("environment {} already registered", env_name);
                     // context.get_env(&env_name).await?
                 }
                 false => {
@@ -239,7 +251,7 @@ async fn main() -> Result<()> {
             let sync = apply_matches.get_flag("sync");
             if sync {
                 let env = context.get_env_mut(&env_name).await?;
-                env.apply().await?;
+                env.sync().await?;
                 println!("Registered and applied environment: {}", env_name);
             } else {
                 // let env = context.get_env(&env_name).await?;
@@ -251,7 +263,7 @@ async fn main() -> Result<()> {
         Some(("delete-env", delete_matches)) => {
             debug!("running 'delete' subcommand");
             let env_name = delete_matches
-                .get_one::<String>("env")
+                .get_one::<String>("env-id")
                 .map(|s| s.to_string())
                 .expect("No environment name provided.");
             context.remove_env(&env_name).await?;
@@ -261,6 +273,16 @@ async fn main() -> Result<()> {
             debug!("running 'run' subcommand");
             context.check_envs_sync_status().await?;
             context.pretty_print_envs().await;
+        }
+        Some(("sync", _sync_matches)) => {
+            debug!("running 'sync-envs' subcommand");
+            let env_names = match _sync_matches.get_many::<String>("env-id") {
+                Some(env_names) => env_names.map(|s| s.to_string()).collect::<HashSet<String>>(),
+                None => HashSet::new(),
+            };
+
+
+            context.sync_envs(&env_names).await?;
         }
         Some(("list-apps", _app_matches)) => {
             debug!("running 'run' subcommand");

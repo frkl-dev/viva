@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use directories::ProjectDirs;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use std::path::{PathBuf};
 
@@ -9,6 +9,7 @@ use crate::models::app::{AppCollection, AppEnvPlacementStrategy, VivaApp, VivaAp
 use crate::models::environment::{EnvSyncStatus, EnvironmentCollection, VivaEnv, VivaEnvSpec};
 use crate::models::read_model_spec;
 use prettytable::{format, Table};
+use tokio::fs;
 
 use tracing::debug;
 
@@ -90,6 +91,59 @@ impl VivaContext {
 
     pub async fn list_envs(&self) -> &BTreeMap<String, VivaEnv> {
         &self.registered_envs
+    }
+
+    pub async fn sync_envs(&mut self, env_ids: &HashSet<String>) -> Result<()> {
+
+        let mut missing: Vec<String> = vec![];
+
+        let all_envs = self.get_env_ids().await;
+        for env_name in env_ids {
+            if ! all_envs.contains(&env_name) {
+                missing.push(env_name.clone());
+            }
+        }
+        match missing.len() {
+            0 => {
+                debug!("Syncing environments: {:?}", &env_ids);
+            }
+            _ => {
+                bail!("The following environments are not registered: {:?}", missing);
+            }
+        }
+
+        let mut env_ids_to_sync: Vec<String> = env_ids.into_iter().cloned().collect();
+        if env_ids_to_sync.len() == 0 {
+            env_ids_to_sync = self.get_env_ids().await;
+        }
+
+        for env_id in env_ids_to_sync {
+            let env = self.get_env_mut(&env_id).await?;
+            match env.sync_status {
+                EnvSyncStatus::Unknown => {
+                    println!("Syncing environment: {}", env_id);
+                    env.check_and_update_sync_status();
+                    match env.sync_status {
+                        EnvSyncStatus::Synced => {
+                            println!("Environment {} is already synced", env_id);
+                        }
+                        _ => {
+                            println!("Syncing environment: {}", env_id);
+                            env.sync().await?;
+                        }
+                    }
+                }
+                EnvSyncStatus::Synced => {
+                    println!("Environment {} is already synced", env_id);
+                }
+                EnvSyncStatus::NotSynced => {
+                    println!("Syncing environment: {}", env_id);
+                    env.sync().await?;
+                }
+            }
+        }
+        Ok(())
+
     }
 
     pub async fn list_apps(&self) -> &BTreeMap<String, VivaApp> {
@@ -319,7 +373,7 @@ impl VivaContext {
         collection_id: Option<&str>,
     ) -> Result<&VivaEnv> {
         if self.has_env(env_id).await {
-            return Err(anyhow!("Environment with id '{}' already exists.", env_id));
+            return Err(anyhow!("Can't add environment: id '{}' already registered.", env_id));
         }
 
         let env_col_name = match collection_id {
@@ -413,6 +467,17 @@ impl VivaContext {
 
         env_col.delete_env(env_id).await?;
         self.registered_envs.remove(env_id);
+        let env_path = self.base_env_path.join(env_id);
+        match env_path.exists() {
+            true => {
+                fs::remove_dir_all(env_path).await?;
+            },
+            false => {
+                debug!("No environment path exists for env '{}', doing nothing.", env_id);
+            }
+        }
+
+
         Ok(())
     }
 
