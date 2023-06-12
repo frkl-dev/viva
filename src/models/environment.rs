@@ -1,5 +1,5 @@
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Debug;
 use std::path::{PathBuf};
 use std::process::Stdio;
@@ -65,6 +65,7 @@ impl PartialEq for VivaEnvSpec {
 impl Eq for VivaEnvSpec {}
 
 /// Join two pacakge spec lists into a single one.
+#[allow(unused)]
 fn join_pkg_specs(spec_1: &Vec<String>, spec_2: &Vec<String>) -> Vec<String> {
     let mut specs: HashSet<String> = HashSet::new();
     specs.extend(spec_1.iter().cloned());
@@ -73,6 +74,7 @@ fn join_pkg_specs(spec_1: &Vec<String>, spec_2: &Vec<String>) -> Vec<String> {
 }
 
 /// Join two channel lists into a single one.
+#[allow(unused)]
 fn join_channels(channel_1: &Vec<String>, channel_2: &Vec<String>) -> Vec<String> {
     let mut specs: HashSet<String> = HashSet::new();
     specs.extend(channel_1.iter().cloned());
@@ -80,6 +82,7 @@ fn join_channels(channel_1: &Vec<String>, channel_2: &Vec<String>) -> Vec<String
     return specs.into_iter().collect();
 }
 
+#[allow(unused)]
 fn pkg_specs_are_equal(spec_1: &Vec<String>, spec_2: &Vec<String>) -> bool {
     let mut specs_1: HashSet<String> = HashSet::new();
     specs_1.extend(spec_1.iter().cloned());
@@ -112,6 +115,7 @@ fn check_for_new_channels(orig_channels: &Vec<String>, new_channels: &Vec<String
     return result;
 }
 
+#[allow(unused)]
 fn channels_are_equal(channel_1: &Vec<String>, channel_2: &Vec<String>) -> bool {
     let mut channels_1: HashSet<String> = HashSet::new();
     channels_1.extend(channel_1.iter().cloned());
@@ -441,7 +445,7 @@ pub trait EnvironmentCollection: Debug {
 
 #[derive(Debug)]
 pub struct DefaultEnvCollection {
-    base_env_path: PathBuf,
+    // base_env_path: PathBuf,
     base_config_path: PathBuf,
 
     collected_envs: Option<BTreeMap<String, VivaEnvSpec>>,
@@ -452,9 +456,8 @@ pub struct DefaultEnvCollection {
 }
 
 impl DefaultEnvCollection {
-    pub async fn create(base_env_path: PathBuf, base_config_path: PathBuf) -> Result<Self> {
+    pub async fn create(base_config_path: PathBuf) -> Result<Self> {
         let mut env = DefaultEnvCollection {
-            base_env_path,
             base_config_path,
             collected_envs: None,
             single_envs: None,
@@ -497,7 +500,7 @@ impl DefaultEnvCollection {
         match self.collected_envs.is_none() || force_update {
             true => match self.base_config_path.exists() {
                 true => {
-                    let mut envs_file = self.find_collected_envs_file();
+                    let envs_file = self.find_collected_envs_file();
 
                     if envs_file.exists() {
                         collected_envs = read_models_spec(&envs_file).await?;
@@ -549,6 +552,7 @@ impl DefaultEnvCollection {
 
     async fn sync_config(&mut self) -> Result<()> {
 
+        // TODO: handle changed envs in collected_envs
         if self.collected_envs_dirty {
             let envs_file = self.find_collected_envs_file();
             match &self.collected_envs {

@@ -379,7 +379,7 @@ impl VivaContext {
         Ok(())
     }
 
-    pub fn get_env_id_for_app(&self, app_id: &str, app_spec: &VivaAppSpec, collection_id: &str, placement_strategy: &AppEnvPlacementStrategy) -> String {
+    pub fn get_env_id_for_app(&self, app_id: &str, _app_spec: &VivaAppSpec, collection_id: &str, placement_strategy: &AppEnvPlacementStrategy) -> String {
 
         match placement_strategy {
             AppEnvPlacementStrategy::Default => {

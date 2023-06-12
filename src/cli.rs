@@ -10,21 +10,21 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{PathBuf};
 use tracing::debug;
-use tracing_subscriber::{util::SubscriberInitExt};
+// use tracing_subscriber::{util::SubscriberInitExt};
 use viva::models::app::{AppEnvPlacementStrategy, DefaultAppCollection, VivaAppSpec};
 use viva::models::environment::DefaultEnvCollection;
 
-fn handle_result<T>(result: Result<T, anyhow::Error>) -> T {
-    if let Err(e) = result {
-        eprintln!("Error: {}", e);
-        for cause in e.chain().skip(1) {
-            eprintln!("Caused by: {}", cause);
-        }
-        std::process::exit(1);
-    } else {
-        result.unwrap()
-    }
-}
+// fn handle_result<T>(result: Result<T, anyhow::Error>) -> T {
+//     if let Err(e) = result {
+//         eprintln!("Error: {}", e);
+//         for cause in e.chain().skip(1) {
+//             eprintln!("Caused by: {}", cause);
+//         }
+//         std::process::exit(1);
+//     } else {
+//         result.unwrap()
+//     }
+// }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct VivaConfig {
@@ -192,11 +192,11 @@ async fn main() -> Result<()> {
     let app = create_command(&viva_config);
     let matches = app.get_matches();
 
-    let env_base_path = context.project_dirs.data_dir().join("envs");
+    // let env_base_path = context.project_dirs.data_dir().join("envs");
     let config_path = PathBuf::from(context.project_dirs.config_dir());
 
     let env_collection =
-        Box::new(DefaultEnvCollection::create(env_base_path, config_path.clone()).await?);
+        Box::new(DefaultEnvCollection::create(config_path.clone()).await?);
     context
         .add_env_collection("default", env_collection)
         .await?;
@@ -204,7 +204,7 @@ async fn main() -> Result<()> {
     let placement_strategy = AppEnvPlacementStrategy::CollectionId;
 
     let app_collection = Box::new(DefaultAppCollection::create(config_path).await?);
-    context.add_app_collection("default", app_collection, Some(placement_strategy)).await;
+    context.add_app_collection("default", app_collection, Some(placement_strategy)).await?;
 
     match matches.subcommand() {
         Some(("register-env", apply_matches)) => {
