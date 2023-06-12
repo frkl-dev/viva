@@ -1,5 +1,5 @@
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::{PathBuf};
 use std::process::Stdio;
@@ -12,10 +12,7 @@ use rattler_repodata_gateway::fetch::CacheAction;
 
 
 use serde::{Deserialize, Serialize};
-
-
-
-
+use tokio::fs;
 
 
 use tokio::process::Command;
@@ -23,7 +20,7 @@ use tracing::debug;
 
 
 use crate::defaults::{CONDA_BIN_DIRNAME};
-use crate::models::{read_model_spec, read_models_spec, write_model_spec};
+use crate::models::{read_model_spec, read_models_spec, write_model_spec, write_models_spec};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum EnvSyncStatus {
@@ -343,24 +340,6 @@ impl VivaEnv {
         Ok(&self.spec.pkg_specs)
     }
 
-    // pub async fn delete(&mut self) -> Result<()> {
-    //     match self.env_path.exists() {
-    //         true => fs::remove_dir_all(&self.env_path).await?,
-    //         false => {},
-    //     };
-    //
-    //     match self.spec_path {
-    //         Some(ref spec_path) => match spec_path.exists() {
-    //             true => match fs::remove_file(&spec_path).await {
-    //                 Ok(_) => Ok(()),
-    //                 Err(e) => Err(anyhow!("Failed to remove environment spec: {}", e)),
-    //             },
-    //             false => Ok(()),
-    //         },
-    //         None => Ok(()),
-    //     }
-    // }
-
     /// Creates a command in the environment, with the specified environment-check  & package-install strategy..
     pub async fn create_command_in_env<S: AsRef<str>, I: AsRef<[S]>>(
         &self,
@@ -456,7 +435,7 @@ pub trait EnvironmentCollection: Debug {
     // fn init(context: &VivaContext) -> Self;
     async fn get_env_ids(&self) -> Vec<String>;
     async fn get_env(&self, env_id: &str) -> Result<&VivaEnvSpec>;
-    async fn delete_env(&mut self, env_id: &str) -> Option<VivaEnv>;
+    async fn delete_env(&mut self, env_id: &str) -> Result<()>;
     async fn set_env(&mut self, env_id: &str, env: &VivaEnvSpec) -> Result<()>;
 }
 
@@ -465,7 +444,11 @@ pub struct DefaultEnvCollection {
     base_env_path: PathBuf,
     base_config_path: PathBuf,
 
-    registered_envs: Option<BTreeMap<String, VivaEnvSpec>>,
+    collected_envs: Option<BTreeMap<String, VivaEnvSpec>>,
+    single_envs: Option<BTreeMap<String, VivaEnvSpec>>,
+
+    collected_envs_dirty: bool,
+    single_envs_dirty: Vec<String>
 }
 
 impl DefaultEnvCollection {
@@ -473,26 +456,54 @@ impl DefaultEnvCollection {
         let mut env = DefaultEnvCollection {
             base_env_path,
             base_config_path,
-            registered_envs: None,
+            collected_envs: None,
+            single_envs: None,
+            collected_envs_dirty: false,
+            single_envs_dirty: Vec::new()
         };
 
         env.load_registered_envs(false).await?;
         Ok(env)
     }
 
+    fn find_collected_envs_file(&self) -> PathBuf {
+
+        let mut envs_file = self.base_config_path.join("envs.json");
+        if !envs_file.exists() {
+            envs_file.set_extension("yaml");
+        }
+        envs_file
+
+    }
+
+    fn find_single_env_file(&self, env_id: &str) -> PathBuf {
+
+        let mut env_file = self.base_config_path.join("envs").join(env_id);
+        env_file.set_extension("json");
+        if !env_file.exists() {
+            env_file.set_extension("yaml");
+        }
+        env_file
+
+    }
+
     async fn load_registered_envs(&mut self, force_update: bool) -> Result<()> {
-        let mut envs: BTreeMap<String, VivaEnvSpec> = BTreeMap::new();
-        match self.registered_envs.is_none() || force_update {
+
+        let mut single_envs: BTreeMap<String, VivaEnvSpec> = BTreeMap::new();
+        let mut collected_envs: BTreeMap<String, VivaEnvSpec>;
+
+        let mut collected_envs_dirty: bool = false;
+
+        match self.collected_envs.is_none() || force_update {
             true => match self.base_config_path.exists() {
                 true => {
-                    let mut envs_file = self.base_config_path.join("envs.json");
-                    if !envs_file.exists() {
-                        envs_file.set_extension("yaml");
-                    }
+                    let mut envs_file = self.find_collected_envs_file();
 
                     if envs_file.exists() {
-                        envs = read_models_spec(&envs_file).await?;
-                    };
+                        collected_envs = read_models_spec(&envs_file).await?;
+                    } else {
+                        collected_envs = BTreeMap::new();
+                    }
 
                     let envs_subdir = &self.base_config_path.join("envs");
                     if envs_subdir.is_dir() {
@@ -509,67 +520,144 @@ impl DefaultEnvCollection {
                                     .to_string_lossy()
                                     .into();
 
-                                if envs.contains_key(&env_id) {
+                                if collected_envs.contains_key(&env_id) {
                                     debug!(
                                         "Overwriting env {}, as it has it's own spec file.",
                                         env_id
                                     );
+                                    collected_envs.remove(&env_id);
+                                    collected_envs_dirty = true;
                                 }
-                                envs.insert(env_id, env_spec);
+                                single_envs.insert(env_id, env_spec);
                             }
                         }
                     }
                 }
-                false => {}
+                false => {
+                    collected_envs = BTreeMap::new();
+                }
             },
-            false => {}
+            false => {
+                collected_envs = BTreeMap::new();
+            }
         }
-        self.registered_envs = Some(envs);
+        self.single_envs = Some(single_envs);
+        self.collected_envs = Some(collected_envs);
+        self.collected_envs_dirty = collected_envs_dirty;
         Ok(())
+    }
+
+    async fn sync_config(&mut self) -> Result<()> {
+
+        if self.collected_envs_dirty {
+            let envs_file = self.find_collected_envs_file();
+            match &self.collected_envs {
+                Some(map) => {
+                    write_models_spec(&envs_file, map).await?;
+                },
+                None => {
+                    if envs_file.exists() {
+                        fs::remove_file(&envs_file).await?;
+                    }
+                }
+            };
+        }
+
+        for env_id in &self.single_envs_dirty {
+            let env_file = self.find_single_env_file(&env_id);
+
+            match self.single_envs.as_ref().unwrap().get(env_id) {
+                Some(env_spec) => {
+                    write_model_spec(&env_file, env_spec).await?;
+                },
+                None => {
+                    if env_file.exists() {
+                        fs::remove_file(&env_file).await?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+
     }
 }
 
 #[async_trait]
 impl EnvironmentCollection for DefaultEnvCollection {
+
     async fn get_env_ids(&self) -> Vec<String> {
-        self.registered_envs
+        let mut collected: Vec<String> = self.collected_envs
             .as_ref()
             .unwrap()
             .iter()
             .map(|(k, _)| String::from(k))
-            .collect()
+            .collect();
+        let mut single: Vec<String> = self.single_envs
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|(k, _)| String::from(k))
+            .collect();
+
+        collected.append(&mut single);
+        collected
+
     }
 
     async fn get_env(&self, env_id: &str) -> Result<&VivaEnvSpec> {
-        let env = self
-            .registered_envs
-            .as_ref()
-            .expect("No envs registered")
+
+        let mut envs = self.single_envs.as_ref().unwrap();
+
+        if ! envs.contains_key(env_id) {
+            envs =  self.collected_envs.as_ref().unwrap();
+        }
+        let env = envs
             .get(env_id)
             .ok_or(anyhow!("No env found with name: {}", env_id));
         env
     }
 
-    async fn delete_env(&mut self, _env_name: &str) -> Option<VivaEnv> {
-        todo!()
-        // self.registered_envs.as_mut().unwrap().remove(env_name)
-    }
+    async fn delete_env(&mut self, env_id: &str) -> Result<()> {
 
-    async fn set_env(&mut self, env_name: &str, env_spec: &VivaEnvSpec) -> Result<()> {
-        let spec_config_file = self
-            .base_config_path
-            .join("envs")
-            .join(format!("{}.json", env_name));
-        // TODO: check if already exists
+        match self.single_envs.as_ref() {
+            Some(envs) => {
+                if envs.contains_key(env_id) {
+                    self.single_envs_dirty.push(env_id.to_string());
+                    self.single_envs.as_mut().unwrap().remove(env_id);
+                }
+            },
+            None => {}
+        }
 
-        write_model_spec(&spec_config_file, env_spec).await?;
-        self.registered_envs
-            .as_mut()
-            .unwrap()
-            .insert(env_name.to_string(), env_spec.clone());
+        self.sync_config().await?;
 
         Ok(())
     }
+
+    async fn set_env(&mut self, env_id: &str, env_spec: &VivaEnvSpec) -> Result<()> {
+
+        if self.get_env_ids().await.iter().any(|s| s == env_id) {
+            return Err(anyhow!("Environment with id '{}' already exists", env_id));
+        }
+
+        let spec_config_file = self
+            .base_config_path
+            .join("envs")
+            .join(format!("{}.yaml", env_id));
+        // TODO: check if already exists
+
+        write_model_spec(&spec_config_file, env_spec).await?;
+        self.single_envs
+            .as_mut()
+            .unwrap()
+            .insert(env_id.to_string(), env_spec.clone());
+
+        self.sync_config().await?;
+        Ok(())
+    }
+
+
 }
 
 #[cfg(test)]

@@ -3,9 +3,7 @@ use directories::ProjectDirs;
 use std::collections::{BTreeMap, HashMap};
 
 use std::path::{PathBuf};
-use uuid::Uuid;
 
-#[macro_use]
 use crate::defaults::{ENV_SPEC_FILENAME};
 use crate::models::app::{AppCollection, AppEnvPlacementStrategy, VivaApp, VivaAppSpec};
 use crate::models::environment::{EnvSyncStatus, EnvironmentCollection, VivaEnv, VivaEnvSpec};
@@ -78,22 +76,8 @@ impl VivaContext {
         for app_id in collection.get_app_ids().await {
             let app_spec = collection.get_app(&app_id).await?;
 
-            let env_id: String = match &placement_strategy {
-                AppEnvPlacementStrategy::Default => {
-                    String::from("default")
-                },
-                AppEnvPlacementStrategy::Custom(e_id) => { String::from(e_id) },
-                AppEnvPlacementStrategy::CollectionId => {
-                    String::from(collection_id)
-                },
-                AppEnvPlacementStrategy::AppId => {
-                    String::from(&app_id)
-                },
-                AppEnvPlacementStrategy::Unique => {
-                    Uuid::new_v4().to_string()
-                }
+            let env_id: String = self.get_env_id_for_app(&app_id, app_spec, collection_id, &placement_strategy);
 
-            };
             self.add_registered_app(&app_id, app_spec.clone(), collection_id, env_id, true)
                 .await?;
         }
@@ -184,6 +168,29 @@ impl VivaContext {
 
     }
 
+    pub async fn merge_all_apps(&mut self) -> Result<()> {
+
+        let app_ids: Vec<String> = self.get_app_ids().await;
+
+        for app_id in app_ids {
+            self.merge_app_into_env(&app_id).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn merge_app_into_env(&mut self, app_id: &str) -> Result<()> {
+
+        let app_env_spec = self.get_app(app_id).await?;
+        let env_id = String::from(app_env_spec.get_env_id());
+        let app_env_spec = app_env_spec.spec.env_spec.clone();
+        let env = self.get_env_mut(&env_id).await?;
+
+        env.merge_spec(&app_env_spec)?;
+
+        Ok(())
+    }
+
     async fn add_registered_env(
         &mut self,
         env_id: &str,
@@ -268,6 +275,16 @@ impl VivaContext {
         env_ids
     }
 
+    pub async fn get_app_ids(&self) -> Vec<String> {
+        let mut app_ids = self
+            .registered_apps
+            .keys()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        app_ids.sort();
+        app_ids
+    }
+
     pub async fn has_env(&self, env_name: &str) -> bool {
         self.registered_envs.contains_key(env_name)
     }
@@ -280,21 +297,7 @@ impl VivaContext {
         placement_strategy: AppEnvPlacementStrategy
     ) -> Result<&VivaApp>{
 
-        let env_id = match placement_strategy {
-            AppEnvPlacementStrategy::Default => {
-                String::from("default")
-            },
-            AppEnvPlacementStrategy::Custom(e_id) => { String::from(e_id) },
-            AppEnvPlacementStrategy::CollectionId => {
-                String::from(collection_id)
-            },
-            AppEnvPlacementStrategy::AppId => {
-                String::from(app_id)
-            },
-            AppEnvPlacementStrategy::Unique => {
-                Uuid::new_v4().to_string()
-            }
-        };
+        let env_id = self.get_env_id_for_app(app_id, &app_spec, collection_id, &placement_strategy);
 
         let app_col = self
             .app_collections
@@ -357,6 +360,7 @@ impl VivaContext {
     }
 
     pub async fn get_env_mut(&mut self, env_id: &str) -> Result<&mut VivaEnv> {
+
         match self.registered_envs.get_mut(env_id) {
             Some(env) => Ok(env),
             None => Err(anyhow!("Environment not found: {}", env_id)),
@@ -375,7 +379,42 @@ impl VivaContext {
         Ok(())
     }
 
+    pub fn get_env_id_for_app(&self, app_id: &str, app_spec: &VivaAppSpec, collection_id: &str, placement_strategy: &AppEnvPlacementStrategy) -> String {
 
+        match placement_strategy {
+            AppEnvPlacementStrategy::Default => {
+                String::from("default")
+            },
+            AppEnvPlacementStrategy::Custom(e_id) => { String::from(e_id) },
+            AppEnvPlacementStrategy::CollectionId => {
+                String::from(collection_id)
+            },
+            AppEnvPlacementStrategy::AppId => {
+                String::from(app_id)
+            },
+        }
+    }
+
+    pub async fn remove_env(&mut self, env_id: &str) -> Result<()> {
+
+        if ! self.has_env(&env_id).await {
+            return Err(anyhow!("No environment registered with id '{}'.", env_id));
+        }
+
+        let env = self.get_env(&env_id).await?;
+
+        let env_col_name = &env.collection_id.clone();
+
+        let env_col = self
+            .env_collections
+            .get_mut(env_col_name)
+            .expect(format!("Environment collection not found: {}", env_col_name).as_str())
+            .as_mut();
+
+        env_col.delete_env(env_id).await?;
+        self.registered_envs.remove(env_id);
+        Ok(())
+    }
 
     pub async fn pretty_print_envs(&self) {
         let envs = self.list_envs().await;
@@ -403,20 +442,35 @@ impl VivaContext {
         table.printstd();
     }
 
-    // pub async fn pretty_print_apps(&mut self) {
-    //     let envs = self.list_apps().await;
-    //     let mut app_names: Vec<String> = envs.keys().map(|k| k.to_string()).collect();
-    //     app_names.sort();
-    //
-    //     let mut table = Table::new();
-    //     table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-    //     table.set_titles(row!["name", "command", "env"]);
-    //     for app in app_names {
-    //         let viva_app = envs.get(&app).unwrap();
-    //         let cmd = viva_app.cmd.join(" ");
-    //         let env_path = viva_app.viva_env.target_prefix.to_str().unwrap();
-    //         table.add_row(row![app, cmd, env_path]);
-    //     }
-    //     table.printstd();
-    // }
+    pub async fn pretty_print_apps(&self) {
+
+        let apps = self.list_apps().await;
+        let mut app_names: Vec<String> = apps.keys().map(|k| k.to_string()).collect();
+        app_names.sort();
+
+        let mut table = Table::new();
+        table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+        table.set_titles(prettytable::row![
+            "name", "cmd", "pkg_specs", "channels", "env_id", "status"
+        ]);
+
+        let compact: bool = false;
+        for app in app_names {
+            if !compact {
+                table.add_row(prettytable::row!["", "", "", "", "", ""]);
+            }
+            let viva_app = apps.get(&app).unwrap();
+            let cmd = viva_app.spec.get_full_cmd().join(" ");
+            let env_id = viva_app.get_env_id();
+            let specs = viva_app.spec.env_spec.pkg_specs.join("\n");
+            let channels = viva_app.spec.env_spec.channels.join("\n");
+            let viva_env = self.get_env(&viva_app.get_env_id()).await.unwrap();
+            // let specs = viva_env.spec.pkg_specs.join("\n");
+            // let channels = viva_env.spec.channels.join("\n");
+            let status = &viva_env.sync_status;
+
+            table.add_row(prettytable::row![app, cmd, specs, channels, env_id, status]);
+        }
+        table.printstd();
+    }
 }

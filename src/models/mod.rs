@@ -53,6 +53,16 @@ pub(crate) async fn read_models_spec<T: DeserializeOwned>(
     }
 }
 
+pub(crate) async fn write_models_spec<T: Serialize>(
+    specs_file: &PathBuf,
+    specs: &BTreeMap<String, T>,
+) -> Result<()> {
+    let mut file = File::create(specs_file).await?;
+    let specs_data = serde_json::to_string_pretty(specs)?;
+    file.write_all(specs_data.as_bytes()).await?;
+    Ok(())
+}
+
 pub(crate) fn parse_models_spec<T: DeserializeOwned>(
     spec_string: &str,
 ) -> Result<BTreeMap<String, T>> {
@@ -193,8 +203,26 @@ pub(crate) async fn write_model_spec<T: Serialize>(
         fs::create_dir_all(parent_dir).await?;
     }
 
-    let mut file = File::create(model_spec_file).await?;
-    let model_spec_data = serde_json::to_string(model_spec)?;
-    file.write_all(model_spec_data.as_bytes()).await?;
+
+    let ext = match model_spec_file.extension() {
+        Some(ext) => {
+            if ext.to_ascii_lowercase() == "yaml" {
+                "yaml"
+            } else {
+                "json"
+            }
+        }
+        None => "json"
+    };
+
+    if ext == "yaml" {
+        let mut file = File::create(model_spec_file).await?;
+        let model_spec_data = serde_yaml::to_string(model_spec)?;
+        file.write_all(model_spec_data.as_bytes()).await?;
+    } else {
+        let mut file = File::create(model_spec_file).await?;
+        let model_spec_data = serde_json::to_string(model_spec)?;
+        file.write_all(model_spec_data.as_bytes()).await?;
+    }
     Ok(())
 }

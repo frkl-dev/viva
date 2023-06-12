@@ -1,5 +1,5 @@
 use ::viva::*;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::builder::OsStr;
 use clap::{arg, Arg, ArgAction, Command};
 use config::{Config, Environment, FileFormat};
@@ -42,6 +42,12 @@ fn create_command(viva_config: &VivaConfig) -> Command {
     let environment_arg = Arg::new("env")
         .help("The name of the environment to use.")
         .default_value("default");
+    let replace_arg = Arg::new("replace")
+        .action(ArgAction::SetTrue)
+        .short('r')
+        .long("replace")
+        .help("Replace the environment if it already exists.");
+
     let channels_arg = Arg::new("channels")
         .short('c')
         .long("channel")
@@ -71,17 +77,17 @@ fn create_command(viva_config: &VivaConfig) -> Command {
         .help("The (optional) arguments for the command to run.")
         .default_values(Vec::<OsStr>::new());
 
-    let env_apply = Arg::new("apply")
+    let env_sync = Arg::new("sync")
         .action(ArgAction::SetTrue)
-        .short('a')
-        .long("apply")
-        .help("Apply all environment packages locally, now.")
+        .short('S')
+        .long("sync")
+        .help("Install all environment packages locally, now.")
         ;
 
-    let app_apply = Arg::new("apply")
+    let app_sync = Arg::new("sync")
         .action(ArgAction::SetTrue)
-        .short('a')
-        .long("apply")
+        .short('S')
+        .long("sync")
         .help("Install all required packages locally, now.")
         ;
 
@@ -92,7 +98,12 @@ fn create_command(viva_config: &VivaConfig) -> Command {
         .arg(environment_arg.clone())
         .arg(channels_arg.clone())
         .arg(pks_specs_arg.clone())
-        .arg(env_apply);
+        .arg(replace_arg)
+        .arg(env_sync);
+
+    let delete_env_subcommand = Command::new("delete-env")
+        .about("Delete an environment.")
+        .arg(environment_arg.clone());
 
     let register_app_subcommand = Command::new("register-app")
         .about("Register an app, and optionally install all the required packages locally.")
@@ -101,7 +112,8 @@ fn create_command(viva_config: &VivaConfig) -> Command {
         .arg(pks_specs_arg.clone())
         .arg(executable_arg)
         .arg(app_args)
-        .arg(app_apply);
+        .arg(app_sync);
+
 
     let cmd_arg = Arg::new("cmd").required(true).help("The command to run.");
     let cmd_args = Arg::new("cmd_args").action(ArgAction::Append).help("The (optional) arguments for the command to run.").default_values(Vec::<OsStr>::new());
@@ -125,6 +137,7 @@ fn create_command(viva_config: &VivaConfig) -> Command {
         .arg(verbose_arg)
         .subcommand(list_envs_subcommand)
         .subcommand(register_env_subcommand)
+        .subcommand(delete_env_subcommand)
         .subcommand(list_apps_subcommand)
         .subcommand(register_app_subcommand)
         .subcommand(run_subcommand);
@@ -204,6 +217,12 @@ async fn main() -> Result<()> {
 
             match context.has_env(&env_name).await {
                 true => {
+                    let replace = apply_matches.get_flag("replace");
+                    if replace {
+                        context.remove_env(&env_name).await?;
+                    } else {
+                        bail!("environment {} already registered", env_name);
+                    }
                     debug!("environment {} already registered", env_name);
                     // context.get_env(&env_name).await?
                 }
@@ -217,10 +236,26 @@ async fn main() -> Result<()> {
                 .merge_env_specs(&env_name, &viva_env_spec, true, true)
                 .await?;
 
-            let env = context.get_env_mut(&env_name).await?;
-            env.apply().await?;
+            let sync = apply_matches.get_flag("sync");
+            if sync {
+                let env = context.get_env_mut(&env_name).await?;
+                env.apply().await?;
+                println!("Registered and applied environment: {}", env_name);
+            } else {
+                // let env = context.get_env(&env_name).await?;
+                println!("Registered environment: {}", env_name);
+            }
 
-            println!("apply: {}, {:?}", env_name, env);
+
+        }
+        Some(("delete-env", delete_matches)) => {
+            debug!("running 'delete' subcommand");
+            let env_name = delete_matches
+                .get_one::<String>("env")
+                .map(|s| s.to_string())
+                .expect("No environment name provided.");
+            context.remove_env(&env_name).await?;
+            println!("Deleted environment: {}", env_name);
         }
         Some(("list-envs", _list_matches)) => {
             debug!("running 'run' subcommand");
@@ -229,8 +264,9 @@ async fn main() -> Result<()> {
         }
         Some(("list-apps", _app_matches)) => {
             debug!("running 'run' subcommand");
-            println!("list-apps");
-            println!("{:?}", context.list_apps().await);
+            context.merge_all_apps().await?;
+            context.check_envs_sync_status().await?;
+            context.pretty_print_apps().await;
         }
         Some(("register-app", set_app_matches)) => {
             debug!("running 'set-app' subcommand");

@@ -19,16 +19,15 @@ pub enum AppEnvPlacementStrategy {
     Default,
     CollectionId,
     AppId,
-    Unique,
     Custom(String),
 }
 
 impl AppEnvPlacementStrategy {
     pub fn from_str(strategy: &str) -> Result<AppEnvPlacementStrategy> {
         match strategy {
-            "collection_id" => Ok(AppEnvPlacementStrategy::CollectionId),
-            "app_id" => Ok(AppEnvPlacementStrategy::AppId),
-            "unique" => Ok(AppEnvPlacementStrategy::Unique),
+            "--default--" => Ok(AppEnvPlacementStrategy::Default),
+            "--collection_id--" => Ok(AppEnvPlacementStrategy::CollectionId),
+            "--app_id--" => Ok(AppEnvPlacementStrategy::AppId),
             _ => Ok(AppEnvPlacementStrategy::Custom(strategy.to_string())),
         }
     }
@@ -62,6 +61,18 @@ impl PartialEq for VivaAppSpec {
 
 impl Eq for VivaAppSpec {}
 
+impl VivaAppSpec {
+
+    pub fn get_full_cmd(&self) -> Vec<String> {
+        let mut cmd = vec!(self.executable.clone());
+        for arg in &self.args {
+            cmd.push(arg.clone());
+        }
+        cmd
+    }
+
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VivaApp {
     pub id: String,
@@ -84,6 +95,10 @@ impl VivaApp {
             app_collection_id,
             env_id: env_id,
         }
+    }
+
+    pub fn get_env_id(&self) -> &str {
+        &self.env_id
     }
 }
 
